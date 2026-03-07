@@ -45,9 +45,9 @@ import {
 } from "./helpers";
 import { calculateSellPrice, estimateCostBasis } from "./quartermaster";
 
-/** Check if item is an ore (game uses both ore_X and X_ore patterns) */
+/** Check if item is an ore (game uses both ore_X and X_ore patterns, plus raw variants) */
 function isOre(itemId: string): boolean {
-  return itemId.startsWith("ore_") || itemId.endsWith("_ore");
+  return itemId.startsWith("ore_") || itemId.endsWith("_ore") || itemId.includes("_ore_");
 }
 
 /** Resolve current station name for chat messages */
@@ -1357,6 +1357,8 @@ async function* factionSellLoop(
 
     for (const item of sellable) {
       if (ctx.shouldStop) return;
+      // Double-check: never withdraw ores unless from a confirmed station bid
+      if (!topBid && isOre(item.itemId)) continue;
       const freeWeight = ctx.cargo.freeSpace(ctx.ship); // Recalculate each iteration
       if (freeWeight <= 0) break; // Cargo full
 
