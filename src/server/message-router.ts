@@ -20,6 +20,7 @@ export interface MessageRouterDeps {
   galaxy: Galaxy;
   db: DB;
   cache: GameCache;
+  sessionStore: import("../data/session-store").SessionStore;
   ensureGalaxyLoaded: () => Promise<void>;
   runDiscovery: () => Promise<void>;
 }
@@ -150,6 +151,13 @@ export function handleClientMessage(
       case "add_bot": {
         try {
           const bot = botManager.addBot(msg.username);
+          // Store credentials in session store so login can find them
+          deps.sessionStore.upsertBot({
+            username: msg.username,
+            password: msg.password,
+            empire: null,
+            playerId: null,
+          });
           broadcast({ type: "notification", level: "info", title: "Bot added", message: bot.username });
         } catch (err) {
           broadcast({ type: "notification", level: "warning", title: "Add failed", message: err instanceof Error ? err.message : String(err) });

@@ -273,6 +273,7 @@ export async function startup(config: AppConfig): Promise<AppServices> {
     galaxy,
     db,
     cache: gameCache,
+    sessionStore,
     ensureGalaxyLoaded,
     runDiscovery,
   };
@@ -376,14 +377,17 @@ function buildBrain(config: AppConfig, logger: TrainingLogger): CommanderBrain {
     ollama: () => createOllamaBrain({
       baseUrl: config.ai.ollama_base_url,
       model: config.ai.ollama_model,
+      maxTokens: config.ai.max_tokens,
       timeoutMs: config.ai.max_latency_ms,
     }),
     gemini: () => createGeminiBrain({
       model: config.ai.gemini_model,
+      maxTokens: config.ai.max_tokens,
       timeoutMs: config.ai.max_latency_ms,
     }),
     claude: () => createClaudeBrain({
       model: config.ai.claude_model,
+      maxTokens: config.ai.max_tokens,
       timeoutMs: config.ai.max_latency_ms,
     }),
     scoring: () => scoringBrain,

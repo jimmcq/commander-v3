@@ -235,6 +235,9 @@ function extractJson(raw: string): Record<string, unknown> {
     try { return JSON.parse(text.slice(firstBrace, lastBrace + 1)); } catch { /* give up */ }
   }
 
+  // Log the full response for debugging incomplete JSON
+  console.warn(`[JSON Parse] Incomplete/invalid JSON from LLM (${text.length} chars):\n${text}`);
+
   throw new Error(`Could not extract JSON from LLM response (${text.length} chars, starts: "${text.slice(0, 60)}...")`);
 }
 
