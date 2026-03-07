@@ -466,6 +466,23 @@ export class GameCache {
     this.db.delete(timedCache).where(eq(timedCache.key, `unsellable:${itemId}`)).run();
   }
 
+  // ── Facility-only Recipes (prevents crafters from retrying known facility-only recipes) ──
+
+  /** Mark a recipe as facility-only (persists for game version lifetime) */
+  markFacilityOnly(recipeId: string): void {
+    this.setStatic(`facility_only:${recipeId}`, "1", this.gameVersion);
+  }
+
+  /** Check if a recipe is known to be facility-only */
+  isFacilityOnly(recipeId: string): boolean {
+    return this.getStatic(`facility_only:${recipeId}`) !== null;
+  }
+
+  /** Get all known facility-only recipe IDs */
+  getFacilityOnlyRecipes(): string[] {
+    return this.getAllByPrefix("facility_only:").map((r) => r.key.replace("facility_only:", ""));
+  }
+
   clearGalaxyCache(): void { this.deleteStatic("galaxy_map"); }
   clearMarketCache(): void { this.clearTimedByPattern("market:%"); }
 

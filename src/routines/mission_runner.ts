@@ -202,6 +202,22 @@ function canCompleteMission(ctx: BotContext, mission: Mission, maxJumps: number,
       return { ok: false, reason: "combat objective" };
     }
 
+    // Deliver objectives: check if bot can source the required item
+    if (action === "deliver" && obj.itemId) {
+      const need = obj.target - obj.progress;
+      const have = ctx.ship.cargo.find(c => c.itemId === obj.itemId)?.quantity ?? 0;
+      if (have < need) {
+        // Check if item is an ore — bots can mine it, but only if they have a mining laser
+        const isOreItem = obj.itemId.startsWith("ore_") || obj.itemId.endsWith("_ore") || obj.itemId.includes("_ore");
+        if (isOreItem) {
+          const hasMiningLaser = ctx.ship.modules.some((m) => m.moduleId.includes("mining"));
+          if (!hasMiningLaser) return { ok: false, reason: `need ${obj.itemId} but no mining laser` };
+          // Has laser — can mine, but it's a complex multi-step mission. Skip for now.
+          return { ok: false, reason: `acquire-and-deliver missions too complex (need ${need} ${obj.itemId})` };
+        }
+      }
+    }
+
     // Craft objectives: check if bot has crafting ability
     if (action === "craft") {
       const hasRecipes = ctx.crafting.getAllRecipes().length > 0;
@@ -235,6 +251,9 @@ export async function* mission_runner(ctx: BotContext): AsyncGenerator<RoutineYi
   const skipCombat = getParam(ctx, "skipCombat", true);
   const maxJumps = getParam(ctx, "maxJumps", 4);
   let hubStation = getParam(ctx, "hubStation", "");
+
+  // Track abandoned mission titles to prevent re-acceptance loops
+  const abandonedTitles = new Set<string>();
 
   // Auto-discover hub station
   if (!hubStation) {
@@ -347,6 +366,11 @@ export async function* mission_runner(ctx: BotContext): AsyncGenerator<RoutineYi
       );
     }
 
+    // Filter out previously abandoned missions (prevents accept→fail→re-accept loops)
+    if (abandonedTitles.size > 0) {
+      candidates = candidates.filter((m) => !abandonedTitles.has(m.title));
+    }
+
     // Feasibility filter — only keep missions we can actually complete
     const feasible: Array<{ mission: Mission; reason?: string }> = [];
     const rejected: string[] = [];
@@ -417,6 +441,10 @@ export async function* mission_runner(ctx: BotContext): AsyncGenerator<RoutineYi
     // ── Execute mission ──
     const result = yield* executeMission(ctx, best, hubStation);
     if (result === "stop") return;
+    if (result === "failed") {
+      abandonedTitles.add(best.title);
+      yield `will not re-accept "${best.title}" this session`;
+    }
 
     // ── Service ──
     await refuelIfNeeded(ctx);

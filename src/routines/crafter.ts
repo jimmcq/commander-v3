@@ -43,7 +43,8 @@ export async function* crafter(ctx: BotContext): AsyncGenerator<RoutineYield, vo
   const materialSource = getParam<string>(ctx, "materialSource", "cargo");
   const sellOutput = getParam(ctx, "sellOutput", true);
   let skillTraining = false;
-  const facilityOnlyRecipes = new Set<string>(); // Blacklist recipes that require production facilities
+  // Seed from persistent cache so we never retry known facility-only recipes
+  const facilityOnlyRecipes = new Set<string>(ctx.cache.getFacilityOnlyRecipes());
 
   // ── Recipe discovery ──
   if (!recipeId || facilityOnlyRecipes.has(recipeId)) {
@@ -223,7 +224,8 @@ export async function* crafter(ctx: BotContext): AsyncGenerator<RoutineYield, vo
         // Facility-only recipes can never be manually crafted — blacklist and abort
         if (errMsg.includes("facility-only") || errMsg.includes("facility_only")) {
           facilityOnlyRecipes.add(step.recipeId);
-          yield `blacklisted ${step.recipeName} (facility-only recipe)`;
+          ctx.cache.markFacilityOnly(step.recipeId);
+          yield `blacklisted ${step.recipeName} (facility-only recipe, persisted)`;
           // If this is the top-level recipe, bail out entirely
           if (step.recipeId === recipeId) {
             yield typedYield("cycle_complete", { type: "cycle_complete", botId: ctx.botId, routine: "crafter" });
