@@ -438,7 +438,7 @@ export type ServerMessage =
   | { type: "skill_milestone"; milestone: SkillMilestone }
   | { type: "notification"; level: "critical" | "warning" | "info"; title: string; message: string }
   | { type: "galaxy_update"; systems: GalaxySystemSummary[] }
-  | { type: "galaxy_detail"; systems: GalaxySystemSummary[]; baseMarket: Record<string, { prices: Array<{ itemId: string; itemName: string; buyPrice: number; sellPrice: number; buyVolume: number; sellVolume: number }>; freshness: { fetchedAt: number; ageMs: number; fresh: boolean } }> }
+  | { type: "galaxy_detail"; systems: GalaxySystemSummary[]; baseMarket: Record<string, { prices: Array<{ itemId: string; itemName: string; buyPrice: number; sellPrice: number; buyVolume: number; sellVolume: number }>; freshness: { fetchedAt: number; ageMs: number; fresh: boolean } }>; baseShipyard: Record<string, { ships: Array<{ id: string; name: string; classId: string; price: number }>; fetchedAt: number }> }
   | { type: "goals_update"; goals: Goal[] }
   | { type: "faction_update"; faction: FactionState }
   | { type: "connected"; version: string }

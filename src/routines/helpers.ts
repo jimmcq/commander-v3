@@ -219,6 +219,20 @@ export async function dockAtCurrent(ctx: BotContext): Promise<void> {
       logWarn(ctx, `market scan failed at ${ctx.player.dockedAtBase}: ${err instanceof Error ? err.message : err}`);
     }
 
+    // Scan shipyard to cache available ships
+    try {
+      const showroom = await ctx.api.shipyardShowroom();
+      if (showroom.length > 0) {
+        const ships = showroom.map((s) => ({
+          id: String(s.id ?? s.ship_id ?? ""),
+          name: String(s.name ?? s.ship_name ?? "Unknown"),
+          classId: String(s.class_id ?? s.ship_class ?? s.classId ?? ""),
+          price: Number(s.price ?? s.cost ?? 0),
+        }));
+        ctx.cache.setShipyardData(ctx.player.dockedAtBase, ships);
+      }
+    } catch { /* non-critical — some stations may lack shipyards */ }
+
     // Analyze market for insights (rate-limited — at most once per 30min per station)
     await analyzeMarketIfStale(ctx);
 

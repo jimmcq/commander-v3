@@ -69,6 +69,10 @@ export interface GalaxyDetailData {
     prices: Array<{ itemId: string; itemName: string; buyPrice: number; sellPrice: number; buyVolume: number; sellVolume: number }>;
     freshness: { fetchedAt: number; ageMs: number; fresh: boolean };
   }>;
+  baseShipyard: Record<string, {
+    ships: Array<{ id: string; name: string; classId: string; price: number }>;
+    fetchedAt: number;
+  }>;
 }
 export const galaxyDetail = writable<GalaxyDetailData | null>(null);
 
@@ -157,7 +161,7 @@ function handleMessage(event: MessageEvent) {
         break;
 
       case "galaxy_detail":
-        galaxyDetail.set({ systems: msg.systems, baseMarket: msg.baseMarket });
+        galaxyDetail.set({ systems: msg.systems, baseMarket: msg.baseMarket, baseShipyard: msg.baseShipyard ?? {} });
         break;
 
       case "market_update":

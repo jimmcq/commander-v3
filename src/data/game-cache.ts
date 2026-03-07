@@ -22,6 +22,7 @@ export class GameCache {
   private gameVersion: string = "unknown";
   private marketFetchedAt = new Map<string, number>();
   private insightFetchedAt = new Map<string, number>();
+  private shipyardCache = new Map<string, { ships: Array<{ id: string; name: string; classId: string; price: number }>; fetchedAt: number }>();
   marketDirty = false;
 
   constructor(
@@ -311,6 +312,30 @@ export class GameCache {
 
   hasAnyMarketData(): boolean {
     return this.marketFetchedAt.size > 0;
+  }
+
+  // ── Shipyard Cache ──
+
+  setShipyardData(stationId: string, ships: Array<{ id: string; name: string; classId: string; price: number }>): void {
+    this.shipyardCache.set(stationId, { ships, fetchedAt: Date.now() });
+  }
+
+  getShipyardData(stationId: string): Array<{ id: string; name: string; classId: string; price: number }> | null {
+    const entry = this.shipyardCache.get(stationId);
+    if (!entry) return null;
+    // Expire after 30 minutes
+    if (Date.now() - entry.fetchedAt > 1_800_000) return null;
+    return entry.ships;
+  }
+
+  getAllShipyardData(): Record<string, { ships: Array<{ id: string; name: string; classId: string; price: number }>; fetchedAt: number }> {
+    const result: Record<string, { ships: Array<{ id: string; name: string; classId: string; price: number }>; fetchedAt: number }> = {};
+    for (const [stationId, entry] of this.shipyardCache) {
+      if (Date.now() - entry.fetchedAt < 1_800_000) {
+        result[stationId] = entry;
+      }
+    }
+    return result;
   }
 
   // ── Market Data Recovery (from SQLite history) ──

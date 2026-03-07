@@ -308,9 +308,10 @@ export function handleClientMessage(
               }
             }
 
-            sendTo(ws, { type: "galaxy_detail", systems, baseMarket });
+            const baseShipyard = deps.cache.getAllShipyardData();
+            sendTo(ws, { type: "galaxy_detail", systems, baseMarket, baseShipyard });
           } catch {
-            sendTo(ws, { type: "galaxy_detail", systems: [], baseMarket: {} });
+            sendTo(ws, { type: "galaxy_detail", systems: [], baseMarket: {}, baseShipyard: {} });
           }
         })();
         break;

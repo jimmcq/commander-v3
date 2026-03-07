@@ -419,6 +419,9 @@
 													{#if poi.resources.length > 0}
 														<span class="text-[10px] text-bio-green">{poi.resources.length} ore{poi.resources.length > 1 ? "s" : ""}</span>
 													{/if}
+t												{#if poi.baseId && $galaxyDetail.baseShipyard[poi.baseId]}
+														<span class="text-[10px] px-1 py-0.5 rounded bg-plasma-cyan/15 text-plasma-cyan">{$galaxyDetail.baseShipyard[poi.baseId].ships.length} ships</span>
+													{/if}
 													<span class="ml-auto text-hull-grey text-[10px]">{isPoiExpanded ? "▲" : "▼"}</span>
 												</button>
 
@@ -493,6 +496,30 @@
 															</div>
 														{:else if poi.hasBase}
 															<p class="text-xs text-hull-grey italic">No market data — dock a bot here to scan prices</p>
+														{/if}
+
+														<!-- Ships for sale (shipyard) -->
+														{#if poi.baseId && $galaxyDetail.baseShipyard[poi.baseId]}
+															{@const shipyard = $galaxyDetail.baseShipyard[poi.baseId]}
+															{@const shipAge = (Date.now() - shipyard.fetchedAt) / 60_000}
+															<div>
+																<div class="flex items-center gap-2 mb-1">
+																	<span class="text-[10px] text-hull-grey">Shipyard</span>
+																	<span class="w-2 h-2 rounded-full {shipAge < 10 ? 'bg-bio-green' : shipAge < 30 ? 'bg-warning-yellow' : 'bg-claw-red'}"
+																		title="Scanned {Math.round(shipAge)}m ago"></span>
+																	<span class="text-[10px] text-hull-grey">{Math.round(shipAge)}m ago</span>
+																	<span class="text-[10px] text-chrome-silver">{shipyard.ships.length} ship{shipyard.ships.length !== 1 ? 's' : ''}</span>
+																</div>
+																<div class="grid gap-1">
+																	{#each shipyard.ships as ship}
+																		<div class="flex items-center gap-3 text-xs px-2 py-1 rounded bg-plasma-cyan/5">
+																			<span class="text-star-white font-medium w-48">{ship.name}</span>
+																			<span class="text-hull-grey text-[10px] mono w-32">{ship.classId}</span>
+																			<span class="mono text-warning-yellow">{formatNum(ship.price)} cr</span>
+																		</div>
+																	{/each}
+																</div>
+															</div>
 														{/if}
 
 														<div class="text-[10px] text-hull-grey mono">ID: {poi.id}</div>
