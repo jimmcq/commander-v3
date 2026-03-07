@@ -907,6 +907,10 @@ export class ApiClient {
     return this.query("claim_insurance");
   }
 
+  async selfDestruct(): Promise<Record<string, unknown>> {
+    return this.mutation("self_destruct");
+  }
+
   // ── Player Settings ──
 
   async setStatus(statusMessage?: string): Promise<Record<string, unknown>> {

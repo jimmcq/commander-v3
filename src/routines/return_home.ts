@@ -18,6 +18,7 @@ import {
   refuelIfNeeded,
   repairIfNeeded,
   ensureMinCredits,
+  recoverStranded,
   getParam,
 } from "./helpers";
 
@@ -45,7 +46,22 @@ export async function* returnHome(ctx: BotContext): AsyncGenerator<RoutineYield,
       await navigateAndDock(ctx, homeBase);
     }
   } catch (err) {
-    yield `return home failed: ${err instanceof Error ? err.message : String(err)}`;
+    const msg = err instanceof Error ? err.message : String(err);
+    yield `return home failed: ${msg}`;
+
+    // If stranded (no fuel), attempt recovery via insurance/self-destruct
+    if (ctx.ship.fuel === 0 && !ctx.player.dockedAtBase) {
+      yield "stranded — attempting recovery";
+      const recovery = await recoverStranded(ctx);
+      yield `recovery: ${recovery.method} (${recovery.recovered ? "success" : "failed"})`;
+      // After recovery (self-destruct respawn), try going home again
+      if (recovery.recovered && ctx.player.dockedAtBase && homeBase && ctx.player.dockedAtBase !== homeBase) {
+        try {
+          await navigateAndDock(ctx, homeBase);
+        } catch { /* at least we're alive */ }
+      }
+    }
+
     yield typedYield("cycle_complete", { type: "cycle_complete", botId: ctx.botId, routine: "return_home" });
     return;
   }

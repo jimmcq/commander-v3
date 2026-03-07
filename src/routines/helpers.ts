@@ -454,11 +454,120 @@ export async function repairIfNeeded(ctx: BotContext, threshold = 80): Promise<b
 }
 
 /**
- * Full station service: refuel + repair + ensure fuel safety before undocking.
+ * Full station service: refuel + repair + buy insurance + ensure fuel safety.
  */
 export async function serviceShip(ctx: BotContext): Promise<void> {
   await repairIfNeeded(ctx, 90);
   await refuelIfNeeded(ctx, 80);
+  await ensureInsurance(ctx);
+}
+
+/**
+ * Buy insurance if not already covered. Protects against ship loss from
+ * stranding, combat, or self-destruct. Coverage = hull + module value.
+ * Only buys when docked and affordable (< 10% of credits).
+ */
+export async function ensureInsurance(ctx: BotContext): Promise<void> {
+  if (!ctx.player.dockedAtBase) return;
+
+  try {
+    const quote = await ctx.api.getInsuranceQuote();
+    // Check if already insured
+    const covered = (quote as any).covered ?? (quote as any).insured ?? false;
+    if (covered) return;
+
+    const premium = Number((quote as any).premium ?? (quote as any).cost ?? 0);
+    if (premium <= 0) return;
+
+    // Only spend up to 10% of credits on insurance
+    if (premium > ctx.player.credits * 0.10) {
+      return; // Too expensive relative to wallet
+    }
+
+    // Buy insurance for 360 ticks (~1 hour at 10s/tick)
+    const ticks = 360;
+    await ctx.api.buyInsurance(ticks);
+    await ctx.refreshState();
+    log(ctx, `bought insurance: ${premium}cr for ${ticks} ticks`);
+  } catch {
+    // Insurance not available or already covered — non-critical
+  }
+}
+
+/**
+ * Recover a stranded bot (0 fuel, not docked, no fuel cells).
+ * Flow: try to burn fuel cells → try to dock nearby → claim insurance →
+ * self-destruct as last resort (respawns at home base).
+ * Returns true if recovery succeeded (bot is now docked or respawned).
+ */
+export async function recoverStranded(ctx: BotContext): Promise<{ recovered: boolean; method: string }> {
+  // Not stranded if docked or has fuel
+  if (ctx.player.dockedAtBase) return { recovered: true, method: "already_docked" };
+  if (ctx.ship.fuel > 0) return { recovered: false, method: "has_fuel" };
+
+  log(ctx, "STRANDED: 0 fuel, attempting recovery");
+
+  // Step 1: Try burning cargo fuel cells
+  const fuelCells = ctx.cargo.getItemQuantity(ctx.ship, "fuel_cell");
+  if (fuelCells > 0) {
+    try {
+      await burnFuelCells(ctx);
+      await ctx.refreshState();
+      if (ctx.ship.fuel > 0) {
+        log(ctx, `burned ${fuelCells} fuel cells, now have ${ctx.ship.fuel} fuel`);
+        // Try to dock at nearest station
+        try {
+          await findAndDock(ctx);
+          return { recovered: true, method: "fuel_cells" };
+        } catch { /* continue */ }
+        return { recovered: true, method: "fuel_cells_undocked" };
+      }
+    } catch { /* no burnable cells */ }
+  }
+
+  // Step 2: Try docking at current POI (maybe we're at a station)
+  if (ctx.station.canDock(ctx.player)) {
+    try {
+      await ctx.api.dock();
+      await ctx.refreshState();
+      if (ctx.player.dockedAtBase) {
+        await refuelIfNeeded(ctx);
+        return { recovered: true, method: "dock_in_place" };
+      }
+    } catch { /* can't dock here */ }
+  }
+
+  // Step 3: Try claiming insurance (may provide ship replacement at home)
+  try {
+    const claimResult = await ctx.api.claimInsurance();
+    await ctx.refreshState();
+    const payout = (claimResult as any).payout ?? (claimResult as any).credits ?? 0;
+    if (payout > 0) {
+      log(ctx, `insurance claimed: ${payout}cr payout`);
+    }
+    // Insurance claim might respawn us — check if we're docked now
+    if (ctx.player.dockedAtBase) {
+      await refuelIfNeeded(ctx);
+      return { recovered: true, method: "insurance_claim" };
+    }
+  } catch {
+    log(ctx, "no insurance to claim");
+  }
+
+  // Step 4: Self-destruct — respawns at home base with starter ship
+  log(ctx, "SELF-DESTRUCT: no other recovery options, respawning at home base");
+  try {
+    await ctx.api.selfDestruct();
+    await ctx.refreshState();
+    // After self-destruct we should be at home base
+    if (ctx.player.dockedAtBase) {
+      await refuelIfNeeded(ctx);
+    }
+    return { recovered: true, method: "self_destruct" };
+  } catch (err) {
+    logError(ctx, "self-destruct failed", err);
+    return { recovered: false, method: "failed" };
+  }
 }
 
 /**
@@ -544,6 +653,9 @@ export async function ensureFuelSafety(ctx: BotContext): Promise<void> {
   } catch (err) {
     logWarn(ctx, `fuel cell acquisition failed: ${err instanceof Error ? err.message : err}`);
   }
+
+  // Ensure insurance before leaving station
+  await ensureInsurance(ctx);
 }
 
 // ── Market Intelligence ──
@@ -876,6 +988,17 @@ export async function handleEmergency(ctx: BotContext): Promise<boolean> {
       return true;
     } catch (err) {
       logError(ctx, `emergency navigation failed`, err);
+    }
+  }
+
+  // Last resort: if fuel is the issue and we're truly stranded, attempt recovery
+  if (issue === "fuel_critical" && ctx.ship.fuel === 0) {
+    log(ctx, "attempting stranded recovery (insurance/self-destruct)");
+    const recovery = await recoverStranded(ctx);
+    if (recovery.recovered) {
+      log(ctx, `stranded recovery succeeded via ${recovery.method}`);
+      if (ctx.player.dockedAtBase) await serviceShip(ctx);
+      return true;
     }
   }
 
