@@ -439,6 +439,33 @@ export class GameCache {
     return systems;
   }
 
+  // ── Fleet-wide Unsellable Items (prevents all traders from repeatedly trying failed items) ──
+
+  /** Mark an item as unsellable fleet-wide (30 min TTL) */
+  markUnsellable(itemId: string): void {
+    this.setTimed(`unsellable:${itemId}`, "1", 1_800_000); // 30 minutes
+  }
+
+  /** Check if an item is fleet-wide blacklisted as unsellable */
+  isUnsellable(itemId: string): boolean {
+    return this.getTimed(`unsellable:${itemId}`) !== null;
+  }
+
+  /** Get all currently unsellable item IDs */
+  getUnsellableItems(): string[] {
+    const rows = this.db.select({ key: timedCache.key, data: timedCache.data, fetchedAt: timedCache.fetchedAt, ttlMs: timedCache.ttlMs })
+      .from(timedCache).where(like(timedCache.key, "unsellable:%")).all();
+    const now = Date.now();
+    return rows
+      .filter((r) => now - r.fetchedAt <= r.ttlMs)
+      .map((r) => r.key.replace("unsellable:", ""));
+  }
+
+  /** Clear unsellable status for an item (e.g., when market conditions change) */
+  clearUnsellable(itemId: string): void {
+    this.db.delete(timedCache).where(eq(timedCache.key, `unsellable:${itemId}`)).run();
+  }
+
   clearGalaxyCache(): void { this.deleteStatic("galaxy_map"); }
   clearMarketCache(): void { this.clearTimedByPattern("market:%"); }
 

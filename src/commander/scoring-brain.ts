@@ -330,6 +330,32 @@ export class ScoringBrain implements CommanderBrain {
       // This bot's current routine is over the diversity threshold — must switch
       const mustSwitch = effectiveRoutine && (cycleRoutineCounts.get(effectiveRoutine as RoutineName) ?? 0) >= this.config.diversityThreshold;
 
+      // Miner fallback: if bot has 3+ rapid-completed routines, assign miner unconditionally.
+      // Miner always has work (find belt, mine, sell) and prevents idle loops.
+      if (bot.rapidRoutines.size >= 3 && !bot.rapidRoutines.has("miner")) {
+        const minerMaxCount = getMaxCount("miner", fleetSize);
+        const minerCount = cycleRoutineCounts.get("miner") ?? 0;
+        if (minerMaxCount === undefined || minerCount < minerMaxCount) {
+          console.log(`[Commander] Pass2: ${bot.botId} has ${bot.rapidRoutines.size} rapid routines — fallback to miner`);
+          assignments.push({
+            botId: bot.botId,
+            routine: "miner",
+            params: this.buildParams("miner", bot, economy, goals, assignments, world),
+            score: 0,
+            reasoning: `Miner fallback (${bot.rapidRoutines.size} rapid-completed routines)`,
+            previousRoutine: effectiveRoutine,
+          });
+          assignedBots.add(bot.botId);
+          cycleRoutineCounts.set("miner", minerCount + 1);
+          this.reassignmentState.set(bot.botId, {
+            lastAssignment: now,
+            lastRoutine: "miner",
+            cooldownUntil: now + this.config.reassignmentCooldownMs,
+          });
+          continue;
+        }
+      }
+
       // Get this bot's scores
       const botScores = allScores.filter((s) => s.botId === bot.botId);
 
@@ -872,9 +898,9 @@ export class ScoringBrain implements CommanderBrain {
         const explorerMax = fleet ? getMaxCount("explorer", fleet.bots.length) ?? 1 : 1;
         const explorerCount = fleet?.bots.filter((b) => b.routine === "explorer").length ?? 0;
         if (explorerCount >= explorerMax) return 200; // Block additional explorers
-        // Guaranteed slot: no explorer assigned in 2+ bot fleet → strong bonus
-        // Score = 25 base + 55 bonus = 80, beats diversity-penalized duplicate miners
-        return (fleet && fleet.bots.length >= 2) ? -55 : 0;
+        // Guaranteed slot: no explorer assigned in 2+ bot fleet → mild bonus
+        // Keep it modest so revenue routines (miner=70, crafter=75) still win by default
+        return (fleet && fleet.bots.length >= 2) ? -15 : 0;
       }
       case "salvager":
         // Salvager is speculative (wrecks are random) — mild idle penalty

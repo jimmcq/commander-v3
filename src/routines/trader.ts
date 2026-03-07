@@ -136,8 +136,8 @@ export async function* trader(ctx: BotContext): AsyncGenerator<RoutineYield, voi
   const enableArbitrage = getParam(ctx, "enableArbitrage", false);
   const traderIndex = getParam(ctx, "traderIndex", 0);
 
-  // Track items that failed to sell this session — prevents looping on unsellable goods
-  const blacklistedItems = new Set<string>();
+  // Track items that failed to sell — seeded from fleet-wide cache, persists across sessions
+  const blacklistedItems = new Set<string>(ctx.cache.getUnsellableItems());
 
   // Commander-assigned route (from scoring brain's arbitrage analysis)
   const assignedItem = getParam(ctx, "assignedItem", "");
@@ -716,8 +716,9 @@ export async function* trader(ctx: BotContext): AsyncGenerator<RoutineYield, voi
 
       // If we know the buy price and the sell price would be a loss, return to faction storage
       if (lastBuyPrice > 0 && liveSellPrice > 0 && liveSellPrice < lastBuyPrice) {
-        yield `unprofitable: paid ${lastBuyPrice}cr, sell price ${liveSellPrice}cr — blacklisting ${item} for this session`;
+        yield `unprofitable: paid ${lastBuyPrice}cr, sell price ${liveSellPrice}cr — blacklisting ${item} fleet-wide`;
         blacklistedItems.add(item);
+        ctx.cache.markUnsellable(item);
 
         // Try faction deposit
         const factionStation = ctx.fleetConfig.factionStorageStation || ctx.fleetConfig.homeBase;
@@ -787,8 +788,9 @@ export async function* trader(ctx: BotContext): AsyncGenerator<RoutineYield, voi
             const actuallySold = creditsGained > 0 || (cargoAfterSell < cargoBeforeSell);
 
             if (!actuallySold && result.priceEach === 0 && result.total === 0) {
-              yield `no demand for ${item} at this station — blacklisting for this session`;
+              yield `no demand for ${item} at this station — blacklisting fleet-wide`;
               blacklistedItems.add(item);
+              ctx.cache.markUnsellable(item);
 
               // Zero out cached sell price so arbitrage won't rediscover this route
               adjustMarketCache(ctx, sellStation, item, "sell", qty, { zeroDemand: true });
@@ -1537,7 +1539,8 @@ async function* factionSellLoop(
       for (const c of unsoldCargo) {
         if (withdrawnItems.some((w) => w.itemId === c.itemId)) {
           blacklistedItems.add(c.itemId);
-          yield `blacklisted ${ctx.crafting.getItemName(c.itemId)} — unsellable this session`;
+          ctx.cache.markUnsellable(c.itemId);
+          yield `blacklisted ${ctx.crafting.getItemName(c.itemId)} — unsellable fleet-wide`;
         }
       }
       if (!sold) {
