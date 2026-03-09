@@ -391,6 +391,28 @@ function sanitizeJson(text: string): string {
     fixed += ch;
   }
 
+  // Repair truncated JSON: if braces/brackets are unbalanced, close them
+  let openBraces = 0;
+  let openBrackets = 0;
+  let inStr = false;
+  let esc = false;
+  for (let i = 0; i < fixed.length; i++) {
+    const ch = fixed[i];
+    if (esc) { esc = false; continue; }
+    if (ch === "\\") { esc = true; continue; }
+    if (ch === '"') { inStr = !inStr; continue; }
+    if (inStr) continue;
+
+    if (ch === "{") openBraces++;
+    else if (ch === "}") openBraces--;
+    else if (ch === "[") openBrackets++;
+    else if (ch === "]") openBrackets--;
+  }
+
+  // Close unclosed brackets/braces
+  if (openBrackets > 0) fixed += "]".repeat(openBrackets);
+  if (openBraces > 0) fixed += "}".repeat(openBraces);
+
   return fixed;
 }
 

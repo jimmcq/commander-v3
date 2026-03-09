@@ -51,7 +51,7 @@ class OllamaNativeBrain implements CommanderBrain {
   constructor(config: OllamaBrainConfig = {}) {
     this.model = config.model ?? "qwen3:8b";
     this.baseUrl = config.baseUrl ?? "http://localhost:11434";
-    this.maxTokens = config.maxTokens ?? 1024;
+    this.maxTokens = config.maxTokens ?? 2048; // Increased from 1024 to handle multi-bot assignments
     this.timeoutMs = config.timeoutMs ?? 60_000;
     this.name = `ollama/${this.model}`;
     this.systemPrompt = buildSystemPrompt(config.promptFile);
