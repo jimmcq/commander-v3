@@ -132,6 +132,8 @@ export class ScoringBrain implements CommanderBrain {
   private beltAssignmentTimestamps = new Map<string, number>(); // botId → timestamp
   /** Contextual bandit — learns base weights from outcomes (optional) */
   banditBrain: BanditBrain | null = null;
+  /** Recipes that are facility-only and cannot be manually crafted */
+  private facilityOnlyRecipes = new Set<string>();
 
   constructor(config?: Partial<ScoringConfig>) {
     this.config = { ...DEFAULT_CONFIG, ...config };
@@ -140,6 +142,11 @@ export class ScoringBrain implements CommanderBrain {
   /** Update config dynamically (e.g., from dashboard settings) */
   updateConfig(partial: Partial<ScoringConfig>): void {
     Object.assign(this.config, partial);
+  }
+
+  /** Mark a recipe as facility-only so it won't be assigned to crafters again */
+  markFacilityOnlyRecipe(recipeId: string): void {
+    this.facilityOnlyRecipes.add(recipeId);
   }
 
   /**
@@ -449,10 +456,23 @@ export class ScoringBrain implements CommanderBrain {
       if (bestScore) {
         const cycleCount = cycleRoutineCounts.get(bestScore.routine) ?? 0;
         console.log(`[Commander] Pass2: ${bestScore.botId} ${effectiveRoutine ?? "idle"} → ${bestScore.routine} (adjusted=${bestAdjusted.toFixed(0)}, mustSwitch=${mustSwitch})`);
+        const params = this.buildParams(bestScore.routine, bot, economy, goals, assignments, world);
+
+        // Detect facility-only recipe failures: if crafter is being reassigned to the same recipe it just failed on
+        if (bestScore.routine === "crafter" && params.recipeId) {
+          const lastAssignment = this.crafterAssignmentHistory.get(bestScore.botId);
+          if (lastAssignment && lastAssignment.recipeId === params.recipeId) {
+            // Same recipe assigned twice in a row = likely facility-only failure
+            this.markFacilityOnlyRecipe(params.recipeId as string);
+            console.log(`[Commander] Marked recipe ${params.recipeId} as facility-only (repeated assignment)`);
+          }
+          this.crafterAssignmentHistory.set(bestScore.botId, { recipeId: params.recipeId as string, attemptCount: 1 });
+        }
+
         assignments.push({
           botId: bestScore.botId,
           routine: bestScore.routine,
-          params: this.buildParams(bestScore.routine, bot, economy, goals, assignments, world),
+          params,
           score: bestAdjusted,
           reasoning: bestScore.reasoning,
           previousRoutine: effectiveRoutine,
@@ -570,11 +590,23 @@ export class ScoringBrain implements CommanderBrain {
 
       if (botScores.length > 0) {
         const best = botScores[0];
+        const params = this.buildParams(best.routine, bot, economy, goals, assignments, world);
+
+        // Detect facility-only recipe failures in fallback too
+        if (best.routine === "crafter" && params.recipeId) {
+          const lastAssignment = this.crafterAssignmentHistory.get(bot.botId);
+          if (lastAssignment && lastAssignment.recipeId === params.recipeId) {
+            this.markFacilityOnlyRecipe(params.recipeId as string);
+            console.log(`[Commander] Marked recipe ${params.recipeId} as facility-only (fallback repeat)`);
+          }
+          this.crafterAssignmentHistory.set(bot.botId, { recipeId: params.recipeId as string, attemptCount: 1 });
+        }
+
         console.log(`[Commander] Fallback: forcing ${bot.botId} → ${best.routine} (score ${best.finalScore.toFixed(0)})`);
         assignments.push({
           botId: bot.botId,
           routine: best.routine,
-          params: this.buildParams(best.routine, bot, economy, goals, assignments, world),
+          params,
           score: best.finalScore,
           reasoning: `fallback: ${best.reasoning}`,
           previousRoutine: null,
@@ -1268,7 +1300,7 @@ export class ScoringBrain implements CommanderBrain {
       case "crafter":
         return this.buildCrafterParams(bot, economy, existingAssignments);
       case "hunter":
-        return { huntZone: "", fleeThreshold: 25, engagementRules: "all" };
+        return { huntZone: "", fleeThreshold: 25, engagementRules: "npcs_only" };
       case "salvager":
         return { salvageYard: homeBase || "", scrapMethod: "scrap" };
       case "mission_runner":
@@ -1600,7 +1632,9 @@ export class ScoringBrain implements CommanderBrain {
     }
 
     // Get available recipes for this bot's skills
-    const available = crafting.getAvailableRecipes(bot.skills ?? {});
+    let available = crafting.getAvailableRecipes(bot.skills ?? {});
+    // Filter out recipes known to be facility-only
+    available = available.filter((r) => !this.facilityOnlyRecipes.has(r.id));
     if (available.length === 0) return baseParams;
 
     // Pre-compute: which items are used as ingredients in ANY recipe
@@ -1802,24 +1836,11 @@ export class ScoringBrain implements CommanderBrain {
     scored.sort((a, b) => b.score - a.score);
 
     if (scored.length > 0 && scored[0].score > 0) {  // Only assign crafter when a recipe has positive score
-      const best = scored[0];
-      // Calculate max batch count constrained by: materials, cargo space, and cap of 5
-      const rawMaterials = crafting.getRawMaterials(best.recipe.id, 1);
-      let maxByMaterials = 10;
-      for (const [itemId, perBatch] of rawMaterials) {
-        const inStorage = Math.max(0, (economy.factionStorage.get(itemId) ?? 0) - (claimedMaterials.get(itemId) ?? 0));
-        maxByMaterials = Math.min(maxByMaterials, Math.floor(inStorage / perBatch));
-      }
-      // Cargo constraint: reuse heaviest step from scoring loop
-      const maxByCargo = best.heaviestStep > 0
-        ? Math.floor(bot.cargoCapacity / best.heaviestStep)
-        : 10;
-      const batchCount = Math.max(1, Math.min(maxByMaterials, maxByCargo, 10));
-      return {
-        ...baseParams,
-        recipeId: best.recipe.id,
-        count: batchCount,
-      };
+<<<<<<< HEAD
+      // Note: we don't assign a specific recipeId here — we let the crafter discover recipes
+      // so it can check the cache for facility-only recipes and skip them.
+      // Scoring here determines IF we should assign a crafter, not WHICH recipe.
+      return baseParams; // Return with empty recipeId — crafter will discover the best available recipe
     }
 
     return baseParams;

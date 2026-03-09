@@ -328,48 +328,124 @@ export function buildStrategicUserPrompt(
   return sections.join("\n\n");
 }
 
+/**
+ * Walk a JSON string starting at `start`, skipping content inside string literals.
+ * Returns the index of the matching closing `}`, or -1 if not found.
+ */
+function findMatchingBrace(text: string, start: number): number {
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
 
+  for (let i = start; i < text.length; i++) {
+    const ch = text[i];
+    if (escaped) { escaped = false; continue; }
+    if (ch === "\\") { escaped = true; continue; }
+    if (ch === '"') { inString = !inString; continue; }
+    if (inString) continue;
+
+    if (ch === "{") depth++;
+    else if (ch === "}") {
+      depth--;
+      if (depth === 0) return i;
+    }
+  }
+  return -1;
+}
+
+/** Sanitize JSON string to fix common formatting issues from LLMs */
+function sanitizeJson(text: string): string {
+  // Remove null bytes and other control characters (except whitespace)
+  let sanitized = text.replace(/[\x00-\x08\x0B-\x0C\x0E-\x1F\x7F]/g, "");
+
+  // Fix trailing commas before ] or }
+  sanitized = sanitized.replace(/,(\s*[}\]])/g, "$1");
+
+  // Fix unescaped newlines inside strings (raw \n or \r in string values)
+  // Walk through and escape raw newlines that appear inside quoted strings
+  let fixed = "";
+  let inString = false;
+  let escaped = false;
+  for (let i = 0; i < sanitized.length; i++) {
+    const ch = sanitized[i];
+    if (escaped) {
+      fixed += ch;
+      escaped = false;
+      continue;
+    }
+    if (ch === "\\") {
+      fixed += ch;
+      escaped = true;
+      continue;
+    }
+    if (ch === '"') {
+      fixed += ch;
+      inString = !inString;
+      continue;
+    }
+    // Inside string: escape raw newlines/carriage returns
+    if (inString && (ch === "\n" || ch === "\r")) {
+      fixed += ch === "\n" ? "\\n" : "\\r";
+      continue;
+    }
+    fixed += ch;
+  }
+
+  return fixed;
+}
+
+/** Try to extract a JSON object from text that may contain thinking/narrative */
 function extractJson(raw: string): Record<string, unknown> {
   const text = raw.trim();
 
-  // Strategy 1: Markdown code fences
-  const fenceMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/);
+  // Strategy 1: Markdown code fences (with or without closing fence)
+  const fenceMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/) ??
+                     text.match(/```(?:json)?\s*([\s\S]*)/);
   if (fenceMatch) {
-    try { return JSON.parse(fenceMatch[1].trim()); } catch { /* try next */ }
-  }
-
-  // Strategy 2: Raw JSON (entire response is JSON)
-  if (text.startsWith("{")) {
-    try { return JSON.parse(text); } catch { /* try next */ }
-  }
-
-  // Strategy 3: Find the JSON object containing "assignments" key
-  // Scan for `{"assignments"` which is our expected output format
-  const assignIdx = text.indexOf('"assignments"');
-  if (assignIdx >= 0) {
-    // Walk backwards to find the opening brace
-    let braceStart = text.lastIndexOf("{", assignIdx);
-    if (braceStart >= 0) {
-      // Find matching closing brace by counting depth
-      let depth = 0;
-      for (let i = braceStart; i < text.length; i++) {
-        if (text[i] === "{") depth++;
-        else if (text[i] === "}") depth--;
-        if (depth === 0) {
-          try { return JSON.parse(text.slice(braceStart, i + 1)); } catch { break; }
-        }
+    const inner = fenceMatch[1].trim();
+    try { return JSON.parse(inner); } catch { /* try brace extraction on inner */ }
+    const start = inner.indexOf("{");
+    if (start >= 0) {
+      const end = findMatchingBrace(inner, start);
+      if (end >= 0) {
+        const candidate = sanitizeJson(inner.slice(start, end + 1));
+        try { return JSON.parse(candidate); } catch { /* try next */ }
       }
     }
   }
 
-  // Strategy 4: First { to last } (greedy)
-  const firstBrace = text.indexOf("{");
-  const lastBrace = text.lastIndexOf("}");
-  if (firstBrace >= 0 && lastBrace > firstBrace) {
-    try { return JSON.parse(text.slice(firstBrace, lastBrace + 1)); } catch { /* give up */ }
+  // Strategy 2: Find the outermost { containing "assignments" and walk braces properly
+  const assignIdx = text.indexOf('"assignments"');
+  if (assignIdx >= 0) {
+    const braceStart = text.lastIndexOf("{", assignIdx);
+    if (braceStart >= 0) {
+      const braceEnd = findMatchingBrace(text, braceStart);
+      if (braceEnd >= 0) {
+        const candidate = sanitizeJson(text.slice(braceStart, braceEnd + 1));
+        try { return JSON.parse(candidate); } catch { /* try next */ }
+      }
+    }
   }
 
-  throw new Error(`Could not extract JSON from LLM response (${text.length} chars, starts: "${text.slice(0, 60)}...")`);
+  // Strategy 3: First { to matching closing brace
+  const firstBrace = text.indexOf("{");
+  if (firstBrace >= 0) {
+    const matchingEnd = findMatchingBrace(text, firstBrace);
+    if (matchingEnd >= 0) {
+      const candidate = sanitizeJson(text.slice(firstBrace, matchingEnd + 1));
+      try { return JSON.parse(candidate); } catch { /* try next */ }
+    }
+
+    // Strategy 3b: Brute-force closing braces backward (in case first } is wrong)
+    for (let i = text.length - 1; i > firstBrace; i--) {
+      if (text[i] === "}") {
+        const candidate = sanitizeJson(text.slice(firstBrace, i + 1));
+        try { return JSON.parse(candidate); } catch { /* try next */ }
+      }
+    }
+  }
+
+  throw new Error(`Could not extract JSON from LLM response (${text.length} chars, starts: "${text.slice(0, 100)}...")`);
 }
 
 /** Parse LLM JSON response into assignments */

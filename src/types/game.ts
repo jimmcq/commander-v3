@@ -347,6 +347,7 @@ export interface NearbyPlayer {
   factionTag: string | null;
   anonymous: boolean;
   inCombat: boolean;
+  isNpc: boolean;
 }
 
 // ── Notifications ──

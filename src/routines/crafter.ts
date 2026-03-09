@@ -295,7 +295,7 @@ export async function* crafter(ctx: BotContext): AsyncGenerator<RoutineYield, vo
         const errMsg = err instanceof Error ? err.message : String(err);
         yield `craft failed: ${errMsg}`;
 
-        // Facility-only recipes can never be manually crafted — blacklist and abort
+        // Facility-only recipes can never be manually crafted — blacklist and discover a new top-level recipe
         if (errMsg.includes("facility-only") || errMsg.includes("facility_only")) {
           facilityOnlyRecipes.add(step.recipeId);
           ctx.cache.markFacilityOnly(step.recipeId);

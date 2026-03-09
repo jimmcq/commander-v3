@@ -242,8 +242,13 @@ export class ApiClient {
   }
 
   async getNearby(): Promise<NearbyPlayer[]> {
-    const data = await this.query<{ nearby?: Array<Record<string, unknown>> }>("get_nearby");
-    return (data.nearby ?? (Array.isArray(data) ? data : [])).map(normalizeNearby);
+    const data = await this.query<{ nearby?: Array<Record<string, unknown>>; pirates?: Array<Record<string, unknown>> }>("get_nearby");
+    const players = data.nearby ?? (Array.isArray(data) ? data : []);
+    const pirates = data.pirates ?? [];
+    return [
+      ...players.map((r) => normalizeNearby(r, false)),
+      ...pirates.map((r) => normalizeNearby(r, true)),
+    ];
   }
 
   async getMap(systemId?: string): Promise<StarSystem[]> {
@@ -1584,7 +1589,7 @@ function normalizeMarketOrder(raw: Record<string, unknown>): MarketOrder {
   };
 }
 
-function normalizeNearby(raw: Record<string, unknown>): NearbyPlayer {
+function normalizeNearby(raw: Record<string, unknown>, isNpc: boolean): NearbyPlayer {
   return {
     playerId: str(raw.player_id),
     username: str(raw.username),
@@ -1593,6 +1598,7 @@ function normalizeNearby(raw: Record<string, unknown>): NearbyPlayer {
     factionTag: (raw.faction_tag as string) ?? null,
     anonymous: Boolean(raw.anonymous),
     inCombat: Boolean(raw.in_combat),
+    isNpc,
   };
 }
 

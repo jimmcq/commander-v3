@@ -276,4 +276,80 @@ describe("Prompt Builder", () => {
     expect(result.assignments.length).toBe(0);
     expect(result.reasoning).toBe("No changes needed");
   });
+
+  // ── Ollama/llama3.2 Compatibility ──
+
+  test("parseLlmResponse handles JSON with trailing commas (Ollama compatibility)", () => {
+    const raw = JSON.stringify({
+      assignments: [
+        { botId: "bot1", routine: "miner", reasoning: "Mining", },
+        { botId: "bot2", routine: "trader", reasoning: "Trading", },
+      ],
+      reasoning: "Plan",
+      confidence: 0.8,
+    }).replace(/,\s*}/g, ",\n}").replace(/,\s*]/g, ",\n]");
+
+    // Manually add trailing commas to simulate Ollama output
+    const withTrailingCommas = raw.replace(/(\}),\n(\])/g, "$1,\n$2");
+
+    const result = parseLlmResponse(withTrailingCommas, new Set(["bot1", "bot2"]));
+    expect(result.assignments.length).toBeGreaterThanOrEqual(1);
+  });
+
+  test("parseLlmResponse handles JSON with control characters", () => {
+    const base = {
+      assignments: [{ botId: "bot1", routine: "miner", reasoning: "Test" }],
+      reasoning: "Safe",
+      confidence: 0.9,
+    };
+
+    const raw = JSON.stringify(base)
+      .replace(/"/g, '"\x00') // Insert null bytes after quotes (Ollama quirk)
+      .replace(/\x00/g, ""); // Then remove them (simulating control char stripping)
+
+    const result = parseLlmResponse(raw, new Set(["bot1"]));
+    expect(result.assignments.length).toBe(1);
+    expect(result.assignments[0].botId).toBe("bot1");
+  });
+
+  test("parseLlmResponse handles prettified JSON from Ollama", () => {
+    const raw = `{
+  "assignments": [
+    {
+      "botId": "Max Power",
+      "routine": "miner",
+      "reasoning": "Ore deficit"
+    }
+  ],
+  "reasoning": "Fleet strategy",
+  "confidence": 0.85
+}`;
+
+    const result = parseLlmResponse(raw, new Set(["Max Power"]));
+    expect(result.assignments.length).toBe(1);
+    expect(result.assignments[0].botId).toBe("Max Power");
+    expect(result.confidence).toBe(0.85);
+  });
+
+  test("parseLlmResponse handles unescaped newlines in strings (Ollama quirk)", () => {
+    const raw = `{
+  "assignments": [
+    {
+      "botId": "bot1",
+      "routine": "miner",
+      "reasoning": "Multi-line
+reasoning with
+actual newlines"
+    }
+  ],
+  "reasoning": "Test",
+  "confidence": 0.9
+}`;
+
+    const result = parseLlmResponse(raw, new Set(["bot1"]));
+    expect(result.assignments.length).toBe(1);
+    expect(result.assignments[0].botId).toBe("bot1");
+    // Reasoning should have escaped newlines
+    expect(result.assignments[0].reasoning).toContain("reasoning");
+  });
 });

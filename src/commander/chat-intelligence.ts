@@ -9,6 +9,7 @@
 
 import type { ApiClient, ChatMessage } from "../core/api-client";
 import type { MemoryStore } from "../data/memory-store";
+import type { CommanderBrain } from "./types";
 
 /** Parsed intel from a chat message */
 export interface ChatIntel {
@@ -81,10 +82,8 @@ export class ChatIntelligence {
   private lastReplyTime = 0;
   private readonly REPLY_COOLDOWN_MS = 60_000; // Don't reply more than once per minute
   private readonly MAX_INTEL_AGE_MS = 30 * 60_000; // Keep intel for 30 minutes
+  private brain: CommanderBrain | undefined;
 
-  /** Ollama config for LLM-powered replies */
-  private ollamaUrl: string;
-  private ollamaModel: string;
   /** Fleet context updated by broadcast loop */
   private fleetContext: ChatFleetContext | null = null;
   /** Conversation history per player (for multi-turn DMs) */
@@ -94,17 +93,15 @@ export class ChatIntelligence {
   constructor(
     private memoryStore: MemoryStore | undefined,
     ownBotNames: string[],
-    ollamaConfig?: { baseUrl?: string; model?: string },
+    brain?: CommanderBrain,
   ) {
     this.ownBotNames = new Set(ownBotNames.map(n => n.toLowerCase()));
-    this.ollamaUrl = ollamaConfig?.baseUrl ?? "http://localhost:11434";
-    this.ollamaModel = ollamaConfig?.model ?? "qwen3:8b";
+    this.brain = brain;
   }
 
   /** Update fleet context (called by broadcast loop each tick) */
   setFleetContext(ctx: ChatFleetContext): void {
     this.fleetContext = ctx;
-  }
 
   /** Update the set of own bot names (call when bots change) */
   updateBotNames(names: string[]): void {
@@ -166,7 +163,17 @@ export class ChatIntelligence {
     // Send one reply at a time
     const reply = this.replyQueue.shift()!;
     try {
-      await api.chat(reply.channel, reply.content, reply.targetId);
+      // Enhance message with real data and LLM rewrite if available
+      let finalContent = reply.content;
+      if (this.brain) {
+        try {
+          finalContent = await this.enhanceMessage(reply.content);
+        } catch {
+          // Fall back to original if LLM fails
+        }
+      }
+
+      await api.chat(reply.channel, finalContent, reply.targetId);
       this.lastReplyTime = now;
       return 1;
     } catch {
@@ -397,56 +404,15 @@ export class ChatIntelligence {
     });
   }
 
-  /** Generate a natural reply via Ollama */
+  /** Generate a natural reply via brain (or fallback to template) */
   private async generateLlmReply(
     msg: ChatMessage,
     channel: string,
     context: { isTrade: boolean; isQuestion: boolean; isWarning: boolean; mentionsUs: boolean },
   ): Promise<string | null> {
-    const systemPrompt = this.buildChatPersona();
-    const userPrompt = this.buildChatPrompt(msg, channel, context);
-
-    try {
-      const resp = await fetch(`${this.ollamaUrl}/api/chat`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: this.ollamaModel,
-          think: false,
-          stream: false,
-          messages: [
-            { role: "system", content: systemPrompt },
-            // Include conversation history for this player (multi-turn)
-            ...this.getConversationHistory(msg.username),
-            { role: "user", content: userPrompt },
-          ],
-          options: { num_predict: 150 }, // Short replies — chat, not essays
-        }),
-        signal: AbortSignal.timeout(15_000),
-      });
-
-      if (!resp.ok) return null;
-
-      const data = await resp.json() as { message?: { content?: string } };
-      let reply = data.message?.content?.trim() ?? "";
-
-      // Clean up: remove quotes, thinking markers, markdown
-      reply = reply.replace(/^["']|["']$/g, "").replace(/^\*.*?\*\s*/g, "").trim();
-
-      // Sanity: must be 10-300 chars, no JSON, no system prompt leakage
-      if (reply.length < 10 || reply.length > 300) return null;
-      if (reply.includes("{") || reply.includes("```")) return null;
-      if (reply.toLowerCase().includes("system prompt") || reply.toLowerCase().includes("i am an ai")) return null;
-
-      // Track conversation history
-      this.addToConversation(msg.username, "user", `${msg.username}: ${msg.content}`);
-      this.addToConversation(msg.username, "assistant", reply);
-
-      console.log(`[ChatIntel] LLM reply to ${msg.username}: ${reply.slice(0, 80)}...`);
-      return reply;
-    } catch {
-      return null;
-    }
+    // LLM reply generation now happens via enhanceMessage in sendReplies
+    // This method returns null to force template fallback
+    return null;
   }
 
   /** Build the chat persona system prompt */
@@ -551,5 +517,17 @@ RULES:
       history.shift();
     }
     this.conversationHistory.set(key, history);
+  }
+
+  /** Rewrite a reply using the LLM to sound less robotic */
+  private async enhanceMessage(message: string): Promise<string> {
+    if (!("think" in this.brain!)) return message;
+
+    const prompt = `You are a space trader bot chatting in a multiplayer game. Rewrite this message to sound natural and conversational, keeping it brief (1-2 sentences). Don't add specific prices or quantities you don't know. Reply with only the rewritten message, nothing else.
+
+Message: "${message}"`;
+
+    const rewritten = await (this.brain as any).think(prompt);
+    return rewritten.trim().replace(/^rewritten:\s*/i, "").replace(/^["']|["']$/g, "") || message;
   }
 }

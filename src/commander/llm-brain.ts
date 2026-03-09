@@ -203,6 +203,23 @@ export class LlmBrain implements CommanderBrain {
     };
   }
 
+  /** Simple text generation for chat message rewriting, formatting, etc. */
+  async think(prompt: string, system?: string): Promise<string> {
+    try {
+      const result = await generateText({
+        model: this.model,
+        system: system ?? "You are a helpful assistant.",
+        prompt: this.promptPrefix + prompt,
+        maxOutputTokens: 256,
+        abortSignal: AbortSignal.timeout(this.timeoutMs),
+      });
+      return result.text || "";
+    } catch (err) {
+      this.lastError = `think() error: ${String(err).slice(0, 100)}`;
+      throw err;
+    }
+  }
+
   private recordHealth(success: boolean, latencyMs: number): void {
     this.successes.push(success);
     this.latencies.push(latencyMs);

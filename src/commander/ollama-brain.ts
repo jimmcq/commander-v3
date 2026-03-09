@@ -123,7 +123,18 @@ class OllamaNativeBrain implements CommanderBrain {
         throw new Error("Empty response from Ollama");
       }
 
-      const parsed = parseLlmResponse(responseText, validBotIds);
+      let parsed;
+      try {
+        parsed = parseLlmResponse(responseText, validBotIds);
+      } catch (parseErr) {
+        // Log full response for debugging (truncated in console output)
+        const isValidJson = responseText.trim().startsWith("{");
+        const braceBalance = (responseText.match(/{/g) ?? []).length === (responseText.match(/}/g) ?? []).length;
+        const errMsg = parseErr instanceof Error ? parseErr.message : String(parseErr);
+        console.error(`[OllamaBrain] JSON parse failed. Valid start: ${isValidJson}, Brace balance: ${braceBalance}`);
+        console.error(`[OllamaBrain] Full response (${responseText.length} chars):\n${responseText}`);
+        throw new Error(`${errMsg}`);
+      }
 
       // Convert to full assignments
       const assignments: Assignment[] = [];

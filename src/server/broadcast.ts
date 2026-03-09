@@ -131,11 +131,8 @@ export function startBroadcastLoop(deps: BroadcastDeps): () => void {
   // Chat intelligence — reads and learns from global/faction chat (shared with Commander)
   const botNames = deps.botManager.getAllBots().map(b => b.username);
   const memStore = deps.commander.getMemoryStore();
-  const aiSettings = deps.commander.getAiSettings();
-  const chatIntel = new ChatIntelligence(memStore, botNames, {
-    baseUrl: aiSettings?.ollamaBaseUrl ?? "http://localhost:11434",
-    model: aiSettings?.ollamaModel ?? "qwen3:8b",
-  });
+  const brain = deps.commander.getBrain();
+  const chatIntel = new ChatIntelligence(memStore, botNames, brain);
   deps.commander.setChatIntelligence(chatIntel);
 
   const timer = setInterval(async () => {

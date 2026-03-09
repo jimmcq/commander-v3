@@ -338,8 +338,7 @@ function filterTargets(
 
       // Engagement rules
       if (rules === "npcs_only") {
-        // NPCs typically have no faction
-        if (p.factionId) return false;
+        if (!p.isNpc) return false;
       } else if (rules === "faction_enemies") {
         if (!p.factionId || p.factionId === ctx.player.factionId) return false;
       }
@@ -349,9 +348,9 @@ function filterTargets(
     })
     // Sort weakest first — prioritize easy wins
     .sort((a, b) => {
-      // Prefer factionless targets (likely NPCs/drifters) over faction players
-      const aIsNpc = !a.factionId ? 0 : 1;
-      const bIsNpc = !b.factionId ? 0 : 1;
+      // Prefer NPCs over faction players
+      const aIsNpc = a.isNpc ? 0 : 1;
+      const bIsNpc = b.isNpc ? 0 : 1;
       return aIsNpc - bIsNpc;
     });
 }
