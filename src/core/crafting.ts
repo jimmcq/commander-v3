@@ -15,7 +15,8 @@ export interface CraftingPlan {
   totalOutput: number;
   ingredients: Array<{ itemId: string; totalNeeded: number; inCargo: number; missing: number }>;
   canCraft: boolean;
-  missingSkills: Array<{ skillId: string; required: number; current: number }>;
+  // v0.227.0: skill requirements removed from all recipes — kept for type compat
+  missingSkills: [];
 }
 
 export interface ShoppingList {
@@ -151,48 +152,9 @@ export class Crafting {
     return this.outputIndex.get(outputItemId) ?? [];
   }
 
-  /** Get all recipes the bot can craft with current skills */
-  getAvailableRecipes(skills: Record<string, number>): Recipe[] {
-    return this.recipes.filter((r) => !this.facilityOnlyIds.has(r.id) && this.hasRequiredSkills(r, skills));
-  }
-
-  /** Check if player has required skills for a recipe */
-  hasRequiredSkills(recipe: Recipe, skills: Record<string, number>): boolean {
-    for (const [skillId, required] of Object.entries(recipe.requiredSkills)) {
-      if ((skills[skillId] ?? 0) < required) return false;
-    }
-    return true;
-  }
-
-  /**
-   * Find the easiest recipe for skill progression.
-   * Returns the recipe with the lowest total skill gap — even if the bot can't craft it yet,
-   * the API may allow attempts on low-level recipes. Sorted by total skill deficit ascending.
-   */
-  findEasiestRecipe(skills: Record<string, number>): { recipe: Recipe; skillGap: number; missingSkills: string[] } | null {
-    if (this.recipes.length === 0) return null;
-
-    const scored = this.recipes.filter((r) => !this.facilityOnlyIds.has(r.id)).map((r) => {
-      let totalGap = 0;
-      const missing: string[] = [];
-      for (const [skillId, required] of Object.entries(r.requiredSkills)) {
-        const current = skills[skillId] ?? 0;
-        if (current < required) {
-          totalGap += required - current;
-          missing.push(`${skillId}:${current}/${required}`);
-        }
-      }
-      return { recipe: r, skillGap: totalGap, missingSkills: missing };
-    });
-
-    // Prefer recipes with 0 gap (should be caught by getAvailableRecipes, but just in case)
-    // then smallest gap, then fewest ingredients (simpler to source)
-    scored.sort((a, b) => {
-      if (a.skillGap !== b.skillGap) return a.skillGap - b.skillGap;
-      return a.recipe.ingredients.length - b.recipe.ingredients.length;
-    });
-
-    return scored[0] ?? null;
+  /** Get all non-facility-only recipes (v0.227.0: skill requirements removed) */
+  getAvailableRecipes(_skills?: Record<string, number>): Recipe[] {
+    return this.recipes.filter((r) => !this.facilityOnlyIds.has(r.id));
   }
 
   // ── Material Chain Resolution ──
@@ -424,7 +386,7 @@ export class Crafting {
     let bestScore = -Infinity;
     for (const recipe of available) {
       if (!this.isChainViable(recipe.id)) continue;
-      const plan = this.planCraft(recipe.id, 1, ship, skills);
+      const plan = this.planCraft(recipe.id, 1, ship);
       if (plan && plan.canCraft) {
         const { profit } = this.estimateMarketProfit(recipe.id);
         // Refining priority: boost recipes whose inputs are all raw ores
@@ -442,25 +404,17 @@ export class Crafting {
   }
 
   /**
-   * Plan crafting: check materials, skills, and determine what's missing.
+   * Plan crafting: check materials and determine what's missing.
+   * v0.227.0: skill requirements removed — only checks ingredients.
    */
   planCraft(
     recipeId: string,
     batchCount: number,
     ship: ShipState,
-    skills: Record<string, number>
+    _skills?: Record<string, number>
   ): CraftingPlan | null {
     const recipe = this.recipeMap.get(recipeId);
     if (!recipe) return null;
-
-    // Check skills
-    const missingSkills: CraftingPlan["missingSkills"] = [];
-    for (const [skillId, required] of Object.entries(recipe.requiredSkills)) {
-      const current = skills[skillId] ?? 0;
-      if (current < required) {
-        missingSkills.push({ skillId, required, current });
-      }
-    }
 
     // Check ingredients
     const ingredients: CraftingPlan["ingredients"] = recipe.ingredients.map((ing) => {
@@ -474,7 +428,7 @@ export class Crafting {
       };
     });
 
-    const canCraft = missingSkills.length === 0 && ingredients.every((i) => i.missing === 0);
+    const canCraft = ingredients.every((i) => i.missing === 0);
 
     return {
       recipeId,
@@ -485,7 +439,7 @@ export class Crafting {
       totalOutput: recipe.outputQuantity * batchCount,
       ingredients,
       canCraft,
-      missingSkills,
+      missingSkills: [],
     };
   }
 

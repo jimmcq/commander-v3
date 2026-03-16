@@ -491,7 +491,7 @@ async function* craftModulesForMarket(
 
     // Craft it
     try {
-      const plan = ctx.crafting.planCraft(recipe.id, 1, ctx.ship, ctx.player.skills);
+      const plan = ctx.crafting.planCraft(recipe.id, 1, ctx.ship);
       if (!plan || !plan.canCraft) {
         yield `can't craft ${recipe.outputItem}: missing materials or skills`;
         continue;

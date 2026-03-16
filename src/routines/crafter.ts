@@ -44,7 +44,7 @@ export async function* crafter(ctx: BotContext): AsyncGenerator<RoutineYield, vo
   // Default to "storage" so crafters pull from faction storage (not just cargo)
   const materialSource = getParam<string>(ctx, "materialSource", "storage");
   const sellOutput = getParam(ctx, "sellOutput", true);
-  let skillTraining = false;
+  // v0.227.0: skill requirements removed from all recipes
   // Seed from persistent cache so we never retry known facility-only recipes
   const facilityOnlyRecipes = new Set<string>(ctx.cache.getFacilityOnlyRecipes());
   // Track recipes that failed due to missing materials — skip them for a while
@@ -119,20 +119,10 @@ export async function* crafter(ctx: BotContext): AsyncGenerator<RoutineYield, vo
 
   if (!recipeId) {
     const total = ctx.crafting.recipeCount;
-    const available = ctx.crafting.getAvailableRecipes(ctx.player.skills).length;
-
-    // Skill progression: try the easiest recipe even if skill-gated
-    // The API may allow crafting low-level recipes, and success grants XP to level up
-    const easiest = ctx.crafting.findEasiestRecipe(ctx.player.skills);
-    if (easiest && easiest.skillGap <= 2) {
-      recipeId = easiest.recipe.id;
-      skillTraining = true;
-      yield `skill training: attempting ${easiest.recipe.name} (gap: ${easiest.missingSkills.join(", ")})`;
-    } else {
-      yield `no craftable recipes (${available} available of ${total} total, skill-gated${easiest ? `, easiest needs: ${easiest.missingSkills.join(", ")}` : ""})`;
-      yield typedYield("cycle_complete", { type: "cycle_complete", botId: ctx.botId, routine: "crafter" });
-      return;
-    }
+    const available = ctx.crafting.getAvailableRecipes().length;
+    yield `no craftable recipes (${available} non-facility of ${total} total)`;
+    yield typedYield("cycle_complete", { type: "cycle_complete", botId: ctx.botId, routine: "crafter" });
+    return;
   }
 
   // Get recipe info
@@ -209,7 +199,7 @@ export async function* crafter(ctx: BotContext): AsyncGenerator<RoutineYield, vo
     // the chain loop below handles each step individually, avoiding cargo overflow
     // from loading intermediates + raw materials simultaneously
     if (chain.length <= 1) {
-      const sourced = await sourceMaterials(ctx, recipe, count, materialSource, skillTraining);
+      const sourced = await sourceMaterials(ctx, recipe, count, materialSource);
       if (!sourced.ok) {
         // Track the missing material so we skip ALL recipes needing it (persists across restarts)
         if (sourced.missingItemId) {
@@ -237,7 +227,7 @@ export async function* crafter(ctx: BotContext): AsyncGenerator<RoutineYield, vo
       if (ctx.shouldStop) return;
 
       // Check if we have the inputs for this step
-      const plan = ctx.crafting.planCraft(step.recipeId, step.batchCount, ctx.ship, ctx.player.skills);
+      const plan = ctx.crafting.planCraft(step.recipeId, step.batchCount, ctx.ship);
       if (!plan) {
         yield `cannot plan: ${step.recipeName}`;
         continue;
@@ -247,7 +237,7 @@ export async function* crafter(ctx: BotContext): AsyncGenerator<RoutineYield, vo
         // Try sourcing missing materials for this specific step
         const stepRecipe = ctx.crafting.getRecipe(step.recipeId);
         if (stepRecipe) {
-          const stepSourced = await sourceMaterials(ctx, stepRecipe, step.batchCount, materialSource, skillTraining);
+          const stepSourced = await sourceMaterials(ctx, stepRecipe, step.batchCount, materialSource);
           if (!stepSourced.ok) {
             if (stepSourced.missingItemId) {
               unavailableMaterials.add(stepSourced.missingItemId);
@@ -484,17 +474,10 @@ async function sourceMaterials(
   recipe: { id: string; ingredients: Array<{ itemId: string; quantity: number }> },
   batchCount: number,
   preferredSource: string,
-  skipSkillCheck = false,
 ): Promise<SourceResult> {
-  const plan = ctx.crafting.planCraft(recipe.id, batchCount, ctx.ship, ctx.player.skills);
+  const plan = ctx.crafting.planCraft(recipe.id, batchCount, ctx.ship);
   if (!plan) return { ok: false, reason: "could not create crafting plan", messages: [] };
   if (plan.canCraft) return { ok: true, reason: "", messages: [] };
-
-  // Check skill requirements first (skip when in skill training mode — let API decide)
-  if (!skipSkillCheck && plan.missingSkills.length > 0) {
-    const missing = plan.missingSkills.map((s) => `${s.skillId} (need ${s.required}, have ${s.current})`).join(", ");
-    return { ok: false, reason: `missing skills: ${missing}`, messages: [] };
-  }
 
   const missing = plan.ingredients.filter((i) => i.missing > 0);
   const messages: string[] = [];

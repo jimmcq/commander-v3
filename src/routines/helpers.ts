@@ -451,21 +451,18 @@ export async function repairIfNeeded(ctx: BotContext, threshold = REPAIR_THRESHO
     repaired = true;
   }
 
-  // Repair worn modules while docked
-  if (ctx.player.dockedAtBase) {
-    // Refresh state to get accurate module durability before checking
-    if (repaired) await ctx.refreshState();
-    for (const mod of ctx.ship.modules) {
-      const durability = mod.durability ?? mod.health ?? 100;
-      if (durability < MODULE_REPAIR_THRESHOLD) {
-        try {
-          await ctx.api.repairModule(mod.moduleId);
-          repaired = true;
-        } catch (err) { logWarn(ctx, `module repair failed (${mod.moduleId}): ${err instanceof Error ? err.message : err}`); }
-      }
+  // Repair worn modules (v0.228.0: repair works in space with repair kits from cargo)
+  if (repaired) await ctx.refreshState();
+  for (const mod of ctx.ship.modules) {
+    const durability = mod.durability ?? mod.health ?? 100;
+    if (durability < MODULE_REPAIR_THRESHOLD) {
+      try {
+        await ctx.api.repairModule(mod.moduleId);
+        repaired = true;
+      } catch (err) { logWarn(ctx, `module repair failed (${mod.moduleId}): ${err instanceof Error ? err.message : err}`); }
     }
-    if (repaired) await ctx.refreshState();
   }
+  if (repaired) await ctx.refreshState();
 
   return repaired;
 }
