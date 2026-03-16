@@ -17,6 +17,7 @@ export interface BotSettingsData {
   storageMode: "sell" | "deposit" | "faction_deposit";
   factionStorage: boolean;
   role: string | null;
+  manualControl: boolean;
 }
 
 export function saveBotSettings(db: DB, username: string, settings: BotSettingsData): void {
@@ -29,6 +30,7 @@ export function saveBotSettings(db: DB, username: string, settings: BotSettingsD
       storageMode: settings.storageMode,
       factionStorage: settings.factionStorage ? 1 : 0,
       role: settings.role ?? null,
+      manualControl: settings.manualControl ? 1 : 0,
     })
     .onConflictDoUpdate({
       target: botSettings.username,
@@ -39,6 +41,7 @@ export function saveBotSettings(db: DB, username: string, settings: BotSettingsD
         storageMode: settings.storageMode,
         factionStorage: settings.factionStorage ? 1 : 0,
         role: settings.role ?? null,
+        manualControl: settings.manualControl ? 1 : 0,
       },
     })
     .run();
@@ -55,6 +58,7 @@ export function loadBotSettings(db: DB, username: string): BotSettingsData | nul
     storageMode: row.storageMode as BotSettingsData["storageMode"],
     factionStorage: row.factionStorage === 1,
     role: row.role ?? null,
+    manualControl: row.manualControl === 1,
   };
 }
 

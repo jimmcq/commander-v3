@@ -62,6 +62,8 @@ export interface CommanderDeps {
   setBotRole?: (botId: string, role: string | null) => void;
   /** Callback to recover bots stuck in error state */
   recoverErrorBots?: () => Promise<void>;
+  /** Check if a bot is under manual control (excluded from commander eval) */
+  isBotManual?: (botId: string) => boolean;
 }
 
 export class Commander {
@@ -105,6 +107,7 @@ export class Commander {
     scoringBrain.crafting = deps.crafting;
     scoringBrain.galaxy = deps.galaxy;
     scoringBrain.market = deps.market;
+    scoringBrain.cache = deps.cache ?? null;
     scoringBrain.minBotCredits = deps.minBotCredits ?? 0;
     this.brain = brain ?? scoringBrain;
     this.economy = new EconomyEngine();
@@ -379,19 +382,29 @@ export class Commander {
     }
 
     // Step 0.7: Ensure galaxy map is loaded (cold-start: bots log in but galaxy may be empty)
+    // Uses cached galaxy data from SQLite — only fetches from API on cache miss or version change
     if (this.deps.galaxy.systemCount < 50) {
       const api = this.deps.getApi?.();
-      if (api) {
+      if (api && this.deps.cache) {
         try {
-          const systems = await api.getMap();
+          const systems = await this.deps.cache.getMap(api);
           for (const sys of systems) this.deps.galaxy.updateSystem(sys);
           console.log(`[Commander] Galaxy bootstrap: loaded ${systems.length} systems`);
         } catch { /* will retry next cycle */ }
       }
     }
 
-    // Step 1: Get fleet state
-    const fleet = this.deps.getFleetStatus();
+    // Step 1: Get fleet state (exclude bots under manual control)
+    const rawFleet = this.deps.getFleetStatus();
+    const manualBots = rawFleet.bots.filter(b => this.deps.isBotManual?.(b.botId));
+    if (manualBots.length > 0) {
+      console.log(`[Commander] Skipping ${manualBots.length} manual-control bot(s): ${manualBots.map(b => b.username).join(", ")}`);
+    }
+    const fleet: import("../bot/types").FleetStatus = {
+      ...rawFleet,
+      bots: rawFleet.bots.filter(b => !this.deps.isBotManual?.(b.botId)),
+      activeBots: rawFleet.activeBots - manualBots.length,
+    };
 
     // Step 1.2: Pool sizing — auto-assign roles to unassigned bots
     if (this.deps.setBotRole) {

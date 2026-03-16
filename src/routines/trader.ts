@@ -1346,27 +1346,17 @@ async function* factionSellLoop(
     // Only consider items with KNOWN buyers (cached sellPrice > 0 at some station).
     // This prevents blind withdrawals that end up re-deposited.
     const cachedStations = ctx.cache.getAllMarketFreshness().map((f) => f.stationId);
-    // Include non-ore items + ores with 5000+ units (overstocked, need to sell)
-    // Skip items that failed to sell this session, and items reserved for facility builds
+    // Prioritize refined/crafted goods — ore is worth far more processed
+    // Only include ores when massively overstocked (10k+ per type)
     const facilityNeeds = ctx.cache.getFacilityMaterialNeeds();
     let nonOreStorage = storageItems.filter((s) =>
-      s.quantity > 0 && (!isOre(s.itemId) || s.quantity >= 5000)
+      s.quantity > 0 && !isOre(s.itemId)
       && !blacklistedItems.has(s.itemId)
-      && !facilityNeeds.has(s.itemId) // Don't sell items needed for facility builds
+      && !facilityNeeds.has(s.itemId)
     );
 
-    // Fallback: if no crafted goods available, sell OVERSTOCKED ores only (5000+ units)
-    // Don't sell small ore quantities — miners/crafters need them in the supply chain
-    if (nonOreStorage.length === 0) {
-      const facilityNeeds = ctx.cache.getFacilityMaterialNeeds();
-      nonOreStorage = storageItems.filter((s) =>
-        s.quantity >= 5000 && isOre(s.itemId) && !blacklistedItems.has(s.itemId)
-        && !facilityNeeds.has(s.itemId) // Don't sell ore needed for facility builds
-      );
-      if (nonOreStorage.length > 0) {
-        yield "no crafted goods — selling overstocked ore (5000+ units)";
-      }
-    }
+    // Never sell raw ore — always refine through crafters first
+    // Ore is worth far more as crafted goods
 
     if (nonOreStorage.length === 0) {
       const blCount = blacklistedItems.size;
@@ -1396,7 +1386,8 @@ async function* factionSellLoop(
       for (const si of nonOreStorage) {
         const priceData = prices.find((p) => p.itemId === si.itemId);
         if (priceData?.sellPrice && priceData.sellPrice > 0) {
-          const qty = si.quantity;
+          // Cap quantity by sellVolume (actual buy order volume) — don't assume infinite demand
+          const qty = priceData.sellVolume > 0 ? Math.min(si.quantity, priceData.sellVolume) : si.quantity;
           const total = priceData.sellPrice * qty;
           revenue += total;
           stationItems.push({ itemId: si.itemId, name: ctx.crafting.getItemName(si.itemId), qty, price: priceData.sellPrice });
@@ -1468,6 +1459,7 @@ async function* factionSellLoop(
             basePrice: ctx.crafting.getEffectiveSellPrice(s.itemId),
             name: ctx.crafting.getItemName(s.itemId),
           }))
+          .filter((s) => s.basePrice > 0 && !ctx.cache.isUnsellable(s.itemId)) // Skip zero-value & blacklisted items
           .sort((a, b) => {
             // Raw materials last, then by value descending (highest-tier first)
             const aRaw = ctx.crafting.isRawMaterial(a.itemId) ? 1 : 0;
@@ -1510,7 +1502,8 @@ async function* factionSellLoop(
 
     for (const item of sellable) {
       if (ctx.shouldStop) return;
-      // Double-check: never withdraw ores unless from a confirmed station bid
+      // Only withdraw ore with confirmed buyer or when massively overstocked (10k+)
+      // Ore is worth far more refined — keep it for crafters
       if (!topBid && isOre(item.itemId)) continue;
       const freeWeight = ctx.cargo.freeSpace(ctx.ship); // Recalculate each iteration
       if (freeWeight <= 0) break; // Cargo full

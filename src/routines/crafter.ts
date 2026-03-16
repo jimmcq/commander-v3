@@ -41,18 +41,36 @@ export async function* crafter(ctx: BotContext): AsyncGenerator<RoutineYield, vo
   let recipeId = getParam(ctx, "recipeId", "");
   const count = getParam(ctx, "count", 1);
   const craftStation = getParam(ctx, "craftStation", "");
-  const materialSource = getParam<string>(ctx, "materialSource", "cargo");
+  // Default to "storage" so crafters pull from faction storage (not just cargo)
+  const materialSource = getParam<string>(ctx, "materialSource", "storage");
   const sellOutput = getParam(ctx, "sellOutput", true);
   let skillTraining = false;
   // Seed from persistent cache so we never retry known facility-only recipes
   const facilityOnlyRecipes = new Set<string>(ctx.cache.getFacilityOnlyRecipes());
+  // Track recipes that failed due to missing materials — skip them for a while
+  const failedRecipes = new Set<string>();
+  // Track materials that couldn't be sourced — skip any recipe needing them
+  // Seeded from persistent cache so blacklist survives routine restarts
+  const unavailableMaterials = new Set<string>(ctx.cache.getUnavailableMaterials(ctx.botId));
+  if (unavailableMaterials.size > 0) {
+    console.log(`[${ctx.botId}] crafter: restored ${unavailableMaterials.size} unavailable materials from cache: ${[...unavailableMaterials].join(", ")}`);
+  }
 
   // ── Recipe discovery ──
+  // Fetch faction storage inventory for material-aware recipe selection
+  let factionInventory = new Map<string, number>();
+  try {
+    const storage = await ctx.api.viewFactionStorageFull();
+    for (const item of storage.items) {
+      factionInventory.set(item.itemId, (factionInventory.get(item.itemId) ?? 0) + item.quantity);
+    }
+  } catch { /* non-critical — will fall back to profit-only selection */ }
+
   if (!recipeId || facilityOnlyRecipes.has(recipeId)) {
     if (facilityOnlyRecipes.has(recipeId)) recipeId = ""; // Reset blacklisted recipe
     yield "analyzing recipes...";
 
-    // Priority: check if facility builds need materials (e.g., steel plates for faction quarters)
+    // Priority 0: check if facility builds need materials (e.g., steel plates for faction quarters)
     const facilityNeeds = ctx.cache.getFacilityMaterialNeeds();
     if (facilityNeeds.size > 0) {
       const needsRecipe = ctx.crafting.findRecipeForNeeds(ctx.player.skills, facilityNeeds);
@@ -64,21 +82,38 @@ export async function* crafter(ctx: BotContext): AsyncGenerator<RoutineYield, vo
     }
 
     if (!recipeId) {
-      // First: try to find something we can craft right now
+      // Priority 1: craft something immediately from cargo
       const immediate = ctx.crafting.findCraftableNow(ctx.ship, ctx.player.skills);
       if (immediate && !facilityOnlyRecipes.has(immediate.id)) {
         recipeId = immediate.id;
         const { profit, hasMarketData } = ctx.crafting.estimateMarketProfit(immediate.id);
         yield `ready to craft: ${immediate.name} (est. profit ${profit}cr${hasMarketData ? " mkt" : ""})`;
-      } else {
-        // Second: find the most profitable recipe we have skills for
-        const best = ctx.crafting.findBestRecipe(ctx.player.skills);
-        if (best && !facilityOnlyRecipes.has(best.id)) {
-          recipeId = best.id;
-          const { profit, hasMarketData } = ctx.crafting.estimateMarketProfit(best.id);
-          yield `target recipe: ${best.name} (est. profit ${profit}cr${hasMarketData ? " mkt" : ""}, need materials)`;
-        }
       }
+    }
+
+    // Priority 2: find the best recipe we can source from faction storage
+    // Loop to skip recipes blocked by unavailable materials
+    for (let attempt = 0; !recipeId && attempt < 20; attempt++) {
+      const excludeIds = new Set([...facilityOnlyRecipes, ...failedRecipes]);
+      const sourced = ctx.crafting.findBestSourceableRecipe(ctx.player.skills, factionInventory, excludeIds);
+      if (!sourced) {
+        if (failedRecipes.size > 0) {
+          failedRecipes.clear();
+          unavailableMaterials.clear();
+          yield "all recipes failed — clearing blacklist, will retry";
+        }
+        break;
+      }
+      // Check if recipe chain requires any unavailable materials
+      const rawMats = ctx.crafting.getRawMaterials(sourced.recipe.id, 1);
+      const blockedMat = [...rawMats.keys()].find(m => unavailableMaterials.has(m));
+      if (blockedMat) {
+        failedRecipes.add(sourced.recipe.id);
+        yield `${sourced.recipe.name} needs unavailable ${ctx.crafting.getItemName(blockedMat)} — skipping`;
+        continue; // Try next recipe
+      }
+      recipeId = sourced.recipe.id;
+      yield `target recipe: ${sourced.recipe.name} (profit ${sourced.profit}cr, materials ${Math.round(sourced.availability * 100)}% available, ${failedRecipes.size} skipped)`;
     }
   }
 
@@ -101,7 +136,7 @@ export async function* crafter(ctx: BotContext): AsyncGenerator<RoutineYield, vo
   }
 
   // Get recipe info
-  const recipe = ctx.crafting.getRecipe(recipeId);
+  let recipe = ctx.crafting.getRecipe(recipeId);
   if (!recipe) {
     yield `unknown recipe: ${recipeId}`;
     yield typedYield("cycle_complete", { type: "cycle_complete", botId: ctx.botId, routine: "crafter" });
@@ -109,8 +144,8 @@ export async function* crafter(ctx: BotContext): AsyncGenerator<RoutineYield, vo
   }
 
   // Build the crafting chain (ordered steps, deepest deps first)
-  const chain = ctx.crafting.buildChain(recipeId, count);
-  const rawMaterials = ctx.crafting.getRawMaterials(recipeId, count);
+  let chain = ctx.crafting.buildChain(recipeId, count);
+  let rawMaterials = ctx.crafting.getRawMaterials(recipeId, count);
 
   // Pre-check: abort if any chain step is a known facility-only recipe
   const brokenStep = chain.find(step => facilityOnlyRecipes.has(step.recipeId));
@@ -176,10 +211,18 @@ export async function* crafter(ctx: BotContext): AsyncGenerator<RoutineYield, vo
     if (chain.length <= 1) {
       const sourced = await sourceMaterials(ctx, recipe, count, materialSource, skillTraining);
       if (!sourced.ok) {
-        yield `${sourced.reason} — waiting for materials`;
-        await interruptibleSleep(ctx, 120_000); // Wait 2 min for miners/crafters to produce
+        // Track the missing material so we skip ALL recipes needing it (persists across restarts)
+        if (sourced.missingItemId) {
+          unavailableMaterials.add(sourced.missingItemId);
+          ctx.cache.markMaterialUnavailable(ctx.botId, sourced.missingItemId);
+        }
+        yield `${sourced.reason} — blacklisting recipe, trying another`;
+        ctx.cache.markRecipeFailed(recipeId);
+        failedRecipes.add(recipeId);
+        recipeId = "";
+        await interruptibleSleep(ctx, 30_000);
         yield typedYield("cycle_complete", { type: "cycle_complete", botId: ctx.botId, routine: "crafter" });
-        continue; // Retry — materials may appear in faction storage
+        continue;
       }
       for (const msg of sourced.messages) {
         yield msg;
@@ -206,9 +249,13 @@ export async function* crafter(ctx: BotContext): AsyncGenerator<RoutineYield, vo
         if (stepRecipe) {
           const stepSourced = await sourceMaterials(ctx, stepRecipe, step.batchCount, materialSource, skillTraining);
           if (!stepSourced.ok) {
-            yield `missing materials for ${step.recipeName}: ${stepSourced.reason} — waiting`;
+            if (stepSourced.missingItemId) {
+              unavailableMaterials.add(stepSourced.missingItemId);
+              ctx.cache.markMaterialUnavailable(ctx.botId, stepSourced.missingItemId);
+            }
+            yield `missing materials for ${step.recipeName}: ${stepSourced.reason} — blacklisting`;
             chainFailed = true;
-            break; // Exit chain loop — will wait and retry
+            break; // Exit chain loop
           }
           for (const msg of stepSourced.messages) {
             yield msg;
@@ -218,7 +265,9 @@ export async function* crafter(ctx: BotContext): AsyncGenerator<RoutineYield, vo
 
       yield `crafting ${step.batchCount}x ${step.recipeName}`;
       try {
-        const batchSize = Math.min(step.batchCount, 10);
+        // v0.226.0: batch size = skill level (was hardcoded to 10)
+        const craftingSkill = ctx.player.skills?.crafting ?? ctx.player.skills?.refining ?? 10;
+        const batchSize = Math.min(step.batchCount, Math.max(1, craftingSkill));
         let remaining = step.batchCount;
         while (remaining > 0) {
           const batch = Math.min(remaining, batchSize);
@@ -256,16 +305,64 @@ export async function* crafter(ctx: BotContext): AsyncGenerator<RoutineYield, vo
         }
 
         chainFailed = true;
+        // Tell scoring brain not to re-assign this recipe (10 min cooldown)
+        ctx.cache.markRecipeFailed(step.recipeId);
+        if (step.recipeId !== recipeId) ctx.cache.markRecipeFailed(recipeId);
         break; // Exit chain loop — will wait and retry
       }
     }
 
     if (ctx.shouldStop) return;
 
-    // Chain failed — wait and retry (materials may appear from miners/crafters)
+    // Chain failed — blacklist recipe and re-discover a different one
     if (chainFailed) {
-      yield "waiting for materials before retrying chain...";
-      await interruptibleSleep(ctx, 120_000);
+      failedRecipes.add(recipeId);
+      yield `chain failed (${failedRecipes.size} blocked) — finding alternative recipe`;
+      recipeId = "";
+      await interruptibleSleep(ctx, 60_000);
+
+      // Re-discover recipe using material availability (refresh faction inventory)
+      try {
+        factionInventory = new Map<string, number>();
+        const storage = await ctx.api.viewFactionStorageFull();
+        for (const item of storage.items) {
+          factionInventory.set(item.itemId, (factionInventory.get(item.itemId) ?? 0) + item.quantity);
+        }
+      } catch { /* use stale inventory */ }
+
+      // Find alternative recipe, skipping ones that need unavailable materials
+      let foundAlt = false;
+      for (let attempt = 0; attempt < 20; attempt++) {
+        const excludeIds = new Set([...facilityOnlyRecipes, ...failedRecipes]);
+        const alt = ctx.crafting.findBestSourceableRecipe(ctx.player.skills, factionInventory, excludeIds);
+        if (!alt) break;
+        // Check if recipe chain requires any unavailable materials
+        const altRawMats = ctx.crafting.getRawMaterials(alt.recipe.id, 1);
+        const blockedMat = [...altRawMats.keys()].find(m => unavailableMaterials.has(m));
+        if (blockedMat) {
+          failedRecipes.add(alt.recipe.id);
+          yield `${alt.recipe.name} needs unavailable ${ctx.crafting.getItemName(blockedMat)} — skipping`;
+          continue;
+        }
+        recipeId = alt.recipe.id;
+        recipe = ctx.crafting.getRecipe(recipeId)!;
+        chain = ctx.crafting.buildChain(recipeId, count);
+        rawMaterials = ctx.crafting.getRawMaterials(recipeId, count);
+        yield `switching to: ${alt.recipe.name} (profit ${alt.profit}cr, materials ${Math.round(alt.availability * 100)}%)`;
+        foundAlt = true;
+        break;
+      }
+      if (!foundAlt) {
+        if (failedRecipes.size > 0) {
+          failedRecipes.clear();
+          unavailableMaterials.clear();
+          yield "all recipes failed — clearing blacklist, will retry next cycle";
+        } else {
+          yield "no alternative recipes available";
+          yield typedYield("cycle_complete", { type: "cycle_complete", botId: ctx.botId, routine: "crafter" });
+          return;
+        }
+      }
       yield typedYield("cycle_complete", { type: "cycle_complete", botId: ctx.botId, routine: "crafter" });
       continue;
     }
@@ -377,6 +474,8 @@ export async function* crafter(ctx: BotContext): AsyncGenerator<RoutineYield, vo
 interface SourceResult {
   ok: boolean;
   reason: string;
+  /** The material ID that couldn't be sourced (only set when material is truly absent, not transient failures) */
+  missingItemId?: string;
   messages: string[];
 }
 
@@ -498,9 +597,21 @@ async function sourceMaterials(
 
     if (got < ing.missing) {
       const shortfall = ing.missing - got;
+      // Only blacklist material if it's truly absent from faction storage
+      // Don't blacklist for transient failures (rate limiting, cargo full, action_in_progress)
+      let isTrulyMissing = true;
+      try {
+        const storage = await ctx.api.viewFactionStorageFull();
+        const inStorage = storage.items.find(i => i.itemId === ing.itemId);
+        if (inStorage && inStorage.quantity >= shortfall) {
+          isTrulyMissing = false; // Material exists — failure was transient
+          console.log(`[${ctx.botId}] ${ing.itemId} has ${inStorage.quantity} in storage — transient failure, not blacklisting`);
+        }
+      } catch { /* can't verify — assume truly missing to be safe */ }
       return {
         ok: false,
         reason: `need ${shortfall} more ${ctx.crafting.getItemName(ing.itemId)}`,
+        missingItemId: isTrulyMissing ? ing.itemId : undefined,
         messages,
       };
     }

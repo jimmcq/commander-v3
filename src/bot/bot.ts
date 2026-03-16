@@ -63,6 +63,8 @@ export class Bot {
 
   /** Credits withdrawn from faction treasury (not real revenue). Drained by broadcast loop. */
   private _factionWithdrawals = 0;
+  /** Credits deposited to faction treasury (not real costs). Drained by broadcast loop. */
+  private _factionDeposits = 0;
 
   /** Full skill data (fetched via getSkills after login) */
   private _skills: Record<string, { level: number; xp: number; xpNext: number }> = {};
@@ -89,6 +91,7 @@ export class Bot {
     storageMode: "sell",
     factionStorage: false,
     role: null,
+    manualControl: false,
   };
 
   /** Fleet-wide config (set by BotManager from app config) */
@@ -168,6 +171,10 @@ export class Bot {
   recordFactionWithdrawal(amount: number): void {
     this._factionWithdrawals += amount;
   }
+  /** Record a faction treasury deposit (not real cost — internal transfer) */
+  recordFactionDeposit(amount: number): void {
+    this._factionDeposits += amount;
+  }
 
   setActiveMissions(missions: Array<{ id: string; title: string; type: string; objectives: Array<{ description: string; progress: number; target: number; complete: boolean }> }>): void {
     this._activeMissions = missions;
@@ -176,6 +183,12 @@ export class Bot {
   drainFactionWithdrawals(): number {
     const amount = this._factionWithdrawals;
     this._factionWithdrawals = 0;
+    return amount;
+  }
+  /** Drain accumulated faction deposits (returns and resets to 0) */
+  drainFactionDeposits(): number {
+    const amount = this._factionDeposits;
+    this._factionDeposits = 0;
     return amount;
   }
   /** Skill levels as flat record (e.g. { mining: 3, trading: 1 }) */
@@ -278,6 +291,7 @@ export class Bot {
         maxCargoFillPct: this.settings.maxCargoFillPct,
         storageMode: this.settings.storageMode,
         factionStorage: this.settings.factionStorage,
+        manualControl: this.settings.manualControl,
       },
       description: this._player?.statusMessage ?? null,
       activeMissions: this._activeMissions,
@@ -649,6 +663,9 @@ export class Bot {
       },
       recordFactionWithdrawal: (amount: number) => {
         bot.recordFactionWithdrawal(amount);
+      },
+      recordFactionDeposit: (amount: number) => {
+        bot.recordFactionDeposit(amount);
       },
       setActiveMissions: (missions) => {
         bot.setActiveMissions(missions);

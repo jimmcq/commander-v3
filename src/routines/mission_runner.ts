@@ -62,10 +62,28 @@ const COMPLETABLE_ACTIONS: Set<ObjectiveAction> = new Set(["travel", "survey", "
 // These CAN work but need profitability checks (item cost vs reward)
 const RISKY_ACTIONS: Set<ObjectiveAction> = new Set(["deliver", "buy", "collect", "craft"]);
 
+/** Map structured objective types from API to our action types */
+const STRUCTURED_TYPE_MAP: Record<string, ObjectiveAction> = {
+  deliver_item: "deliver",
+  mine_resource: "mine",
+  visit_system: "travel",
+  dock_at_base: "travel",
+  kill_pirate: "kill",
+  // sell_wreck: too complex (find wreck → tow → pirate base → sell) — filtered out as "unknown"
+  craft_item: "craft",
+  buy_item: "buy",
+  survey_system: "survey",
+};
+
 function classifyObjective(obj: MissionObjective): ObjectiveAction {
-  // Use structured type if available
-  if (obj.objectiveType) {
-    const t = obj.objectiveType.toLowerCase();
+  // Use structured type from API if available (most reliable)
+  // normalizeMission maps API "type" field → objectiveType
+  const objType = obj.objectiveType;
+  if (objType) {
+    const mapped = STRUCTURED_TYPE_MAP[objType.toLowerCase()];
+    if (mapped) return mapped;
+    // Fallback: check if the type string contains an action keyword
+    const t = objType.toLowerCase();
     for (const [action, _] of Object.entries(ACTION_KEYWORDS)) {
       if (t.includes(action)) return action as ObjectiveAction;
     }
@@ -228,19 +246,13 @@ function canCompleteMission(ctx: BotContext, mission: Mission, maxJumps: number,
         const have = ctx.ship.cargo.find(c => c.itemId === obj.itemId)?.quantity ?? 0;
         if (have < need) {
           const shortfall = need - have;
-          // Ores: too complex (mine + deliver multi-step)
-          const isOreItem = obj.itemId.startsWith("ore_") || obj.itemId.endsWith("_ore");
-          if (isOreItem) {
-            return { ok: false, reason: `acquire-and-deliver ore too complex (need ${shortfall} ${obj.itemId})` };
-          }
           // Estimate buy cost for profitability check
           const unitPrice = ctx.crafting.getItemBasePrice(obj.itemId);
           if (unitPrice > 0) {
             estimatedItemCost += unitPrice * shortfall;
-          } else {
-            // Unknown item price — risky
-            return { ok: false, reason: `unknown item price for ${obj.itemId}` };
           }
+          // Zero-price or unknown items: still allow if reward covers trip cost
+          // (faction storage may have them, or they can be mined cheaply)
         }
       } else {
         // Deliver objective with no item ID — can't determine what to deliver
@@ -839,24 +851,33 @@ async function* handleDeliverObjective(
     const have = ctx.ship.cargo.find(c => c.itemId === requiredItem)?.quantity ?? 0;
     const need = obj.target - obj.progress;
     if (have < need) {
-      // Try to withdraw from storage
-      if (ctx.player.dockedAtBase) {
-        yield `need ${need - have} more ${requiredItem}, checking storage`;
-        try {
-          await ctx.api.withdrawItems(requiredItem, need - have);
-          await ctx.refreshState();
-        } catch { /* not in storage */ }
+      if (!ctx.player.dockedAtBase) {
+        try { await findAndDock(ctx); } catch { /* ok */ }
       }
-      // Try to buy
-      const haveNow = ctx.ship.cargo.find(c => c.itemId === requiredItem)?.quantity ?? 0;
-      if (haveNow < need) {
-        if (!ctx.player.dockedAtBase) {
-          try { await findAndDock(ctx); } catch { /* ok */ }
-        }
-        if (ctx.player.dockedAtBase) {
-          yield `buying ${need - haveNow} ${requiredItem}`;
+      if (ctx.player.dockedAtBase) {
+        const shortfall = need - have;
+        // Try faction storage first (free, we have massive ore stockpiles)
+        yield `need ${shortfall} more ${requiredItem}, checking faction storage`;
+        try {
+          await ctx.api.factionWithdrawItems(requiredItem, shortfall);
+          await ctx.refreshState();
+        } catch { /* not in faction storage */ }
+
+        // Try personal storage
+        const haveNow1 = ctx.ship.cargo.find(c => c.itemId === requiredItem)?.quantity ?? 0;
+        if (haveNow1 < need) {
           try {
-            await ctx.api.buy(requiredItem, need - haveNow);
+            await ctx.api.withdrawItems(requiredItem, need - haveNow1);
+            await ctx.refreshState();
+          } catch { /* not in personal storage */ }
+        }
+
+        // Try to buy as last resort
+        const haveNow2 = ctx.ship.cargo.find(c => c.itemId === requiredItem)?.quantity ?? 0;
+        if (haveNow2 < need) {
+          yield `buying ${need - haveNow2} ${requiredItem}`;
+          try {
+            await ctx.api.buy(requiredItem, need - haveNow2);
             await ctx.refreshState();
           } catch (err) {
             yield `buy failed: ${err instanceof Error ? err.message : String(err)}`;

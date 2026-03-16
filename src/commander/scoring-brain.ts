@@ -98,11 +98,11 @@ const ROUTINE_COOLDOWNS: Partial<Record<RoutineName, number>> = {
 
 const DEFAULT_CONFIG: ScoringConfig = {
   baseScores: {
-    miner: 70,        // TOP PRIORITY: feeds supply chain with ore → faction storage
-    harvester: 45,    // Multi-target extraction (ice/gas), lower than miner
-    trader: 55,       // Arbitrage trading — buys low, sells high using market data
+    miner: 50,        // Reduced — ore stockpile is massive, crafters are bottleneck
+    harvester: 35,    // Multi-target extraction (ice/gas), lower than miner
+    trader: 65,       // Sells refined goods — direct revenue generator
     explorer: 40,     // Charts systems, data gathering — useful but no direct revenue
-    crafter: 75,      // TOP PRIORITY: converts ore → high-end goods → faction storage
+    crafter: 90,      // HIGHEST PRIORITY: converts ore → refined goods (10-50x value multiplier)
     hunter: 15,       // Low priority but not dead — occasional loot value
     salvager: 15,     // Low priority — wrecks can be profitable
     mission_runner: 50, // Reliable income: smart mission selection, skips combat, refreshes market data
@@ -754,11 +754,13 @@ export class ScoringBrain implements CommanderBrain {
 
     switch (routine) {
       case "crafter":
-        // Crafter should be strongly preferred when ANY ore is available to process
-        if (oreInStorage >= 50) return 50;  // Lots of ore — definitely need crafters
-        if (oreInStorage >= 20) return 40;  // Good supply
-        if (oreInStorage >= 10) return 30;  // Decent supply — crafter should be active
-        if (oreInStorage >= 3) return 20;   // Minimum viable batch — start crafting
+        // Crafter should be strongly preferred when ore is available to process
+        // Ore is worth 10-50x more refined — crafting is the highest-margin activity
+        if (oreInStorage >= 1000) return 80; // Massive stockpile — max urgency to refine
+        if (oreInStorage >= 100) return 60;  // Large supply — need more crafters
+        if (oreInStorage >= 50) return 50;   // Good supply — keep crafting
+        if (oreInStorage >= 20) return 40;   // Decent supply
+        if (oreInStorage >= 3) return 20;    // Minimum viable batch
         return 0;
       case "miner":
         // Miner gets bonus when storage is empty, penalty when ore is piling up
@@ -766,32 +768,42 @@ export class ScoringBrain implements CommanderBrain {
         if (oreInStorage < 10) return 10;   // Low ore — keep mining
         if (oreInStorage < 30) return 0;    // Neutral — enough ore for now
         if (oreInStorage < 100) return -20; // Piling up — crafter should take priority
-        return -60; // 100+ ore: strong penalty — seriously over-stocked, stop mining
+        if (oreInStorage < 1000) return -60; // Over-stocked — stop mining
+        return -120; // 1000+ ore: massive penalty — storage overflowing, absolutely stop mining
       case "trader":
-        // Trader gets bonus when crafted goods are in storage (ready to sell)
+        // Trader gets bonus when refined/crafted goods are in storage (ready to sell)
+        // These are the high-margin items — ore refined into valuable products
         {
           const goodsInStorage = [...economy.factionStorage.entries()]
-            .filter(([id]) => id.startsWith("refined_") || id.startsWith("component_"))
+            .filter(([id]) => !id.includes("ore") && !id.includes("ice") && !id.includes("gas"))
             .reduce((sum, [, qty]) => sum + qty, 0);
-          if (goodsInStorage >= 20) return 25;
-          if (goodsInStorage >= 5) return 10;
+          if (goodsInStorage >= 50) return 50;  // Lots of refined goods — sell urgently
+          if (goodsInStorage >= 20) return 35;
+          if (goodsInStorage >= 5) return 15;
         }
-        // Trader also gets bonus when ore is massively over-stocked (5000+)
-        // At this point traders should sell raw ore to free up storage
+        // Only sell raw ore as last resort when massively overstocked (10k+)
         {
           let oreOverstock = 0;
           for (const [, qty] of oreBreakdown) {
-            if (qty >= 5000) oreOverstock += qty;
+            if (qty >= 10000) oreOverstock += qty - 5000;
           }
           if (oreOverstock > 0) return 40; // Sell excess ore
         }
         return 0;
       case "quartermaster":
-        // QM should create sell orders for massively over-stocked ores (5000+)
+        // QM sells refined goods from faction storage — high-margin activity
+        {
+          const refinedGoods = [...economy.factionStorage.entries()]
+            .filter(([id]) => !id.includes("ore") && !id.includes("ice") && !id.includes("gas"))
+            .reduce((sum, [, qty]) => sum + qty, 0);
+          if (refinedGoods >= 20) return 40;
+          if (refinedGoods >= 5) return 20;
+        }
+        // Also sell massively overstocked ore (10k+)
         {
           let oreSellable = 0;
           for (const [, qty] of oreBreakdown) {
-            if (qty >= 5000) oreSellable += qty;
+            if (qty >= 10000) oreSellable += qty - 5000;
           }
           if (oreSellable > 0) return 30;
         }
@@ -980,7 +992,8 @@ export class ScoringBrain implements CommanderBrain {
       case "hunter": {
         // Must have actual weapon modules — mining_laser, survey_scanner etc. don't count
         const hasWeapon = hasModule("weapon_") || hasModule("cannon") || hasModule("missile")
-          || hasModule("turret") || hasModule("gun") || hasModule("blaster") || hasModule("railgun");
+          || hasModule("turret") || hasModule("gun") || hasModule("blaster") || hasModule("railgun")
+          || hasModule("pulse_laser") || hasModule("em_disruptor");
         return hasWeapon ? 0 : 200;
       }
       case "salvager": {
@@ -1357,6 +1370,8 @@ export class ScoringBrain implements CommanderBrain {
   galaxy: import("../core/galaxy").Galaxy | null = null;
   /** Market service (set by Commander for per-bot arbitrage) */
   market: import("../core/market").Market | null = null;
+  /** Game cache (set by Commander for recipe failure blacklisting) */
+  cache: import("../data/game-cache").GameCache | null = null;
   /** Pending ship upgrades queued by Commander (botId → upgrade info) */
   pendingUpgrades = new Map<string, PendingUpgrade>();
   /** Ship catalog (set by Commander for ship fitness scoring) */
@@ -1538,11 +1553,17 @@ export class ScoringBrain implements CommanderBrain {
       }
     }
 
+    // Items we never want to craft (unsellable, no demand)
+    const NEVER_CRAFT_ITEMS = new Set(["crimson_bloodwine"]);
+
     // Score each recipe — prefer highest tier WHERE materials are available
     const scored: Array<{ recipe: typeof available[0]; score: number; reason: string; heaviestStep: number }> = [];
     for (const recipe of available) {
+      if (NEVER_CRAFT_ITEMS.has(recipe.outputItem)) continue;
       if (claimedRecipes.has(recipe.id)) continue;
       if (claimedOutputs.has(recipe.outputItem)) continue; // Don't flood same item
+      // Skip recipes that recently failed to craft (10 min cooldown from game-cache)
+      if (this.cache?.isRecipeFailed(recipe.id)) continue;
 
       let score = 0;
       let reason = "";
@@ -1657,22 +1678,28 @@ export class ScoringBrain implements CommanderBrain {
         score += Math.min(outputPrice / 15, 50); // Up to +50 for high-value products
       }
 
-      // Factor 7: No-demand penalty — end products with no market data are likely unsellable
-      // If the item isn't an intermediate (usageCount === 0) AND profit estimation relied
-      // on MSRP (not real market data), apply a heavy penalty — nobody is buying this.
+      // Factor 7: No-demand penalty — reduced when ore stockpile is high
+      // Any crafted good is worth more than raw ore sitting in storage
       if (usageCount === 0 && !hasMarketData) {
-        score -= 80;
-        reason += " -NO_DEMAND(no market data, end product)";
+        const oreTotal = [...economy.factionStorage.entries()]
+          .filter(([id]) => id.includes("ore"))
+          .reduce((sum, [, qty]) => sum + qty, 0);
+        // With massive ore stockpile, be less picky — crafting anything adds value
+        const penalty = oreTotal > 1000 ? 20 : oreTotal > 100 ? 40 : 80;
+        score -= penalty;
+        reason += ` -NO_DEMAND(penalty=${penalty}, ore=${oreTotal})`;
       }
 
-      // Factor 8: Inventory saturation — aggressive overproduction prevention
-      // End products (not used in other recipes) get a tight ceiling (15 units).
-      // Intermediates (ingredients for higher-tier recipes) get a lenient ceiling (100 units).
-      // Fleet consumables (fuel cells) get a generous ceiling (200 units) — every bot burns these.
+      // Factor 8: Inventory saturation — overproduction prevention
+      // End products with proven demand (market data) get moderate ceiling (50).
+      // End products WITHOUT demand data get tight ceiling (10) — stop flooding unsellable goods.
+      // Intermediates (ingredients for higher-tier recipes) get lenient ceiling (200).
+      // Fleet consumables (fuel cells) get generous ceiling (200) — every bot burns these.
       const outputInStorage = economy.factionStorage.get(recipe.outputItem) ?? 0;
       const isIntermediate = usageCount > 0;
       const isFleetConsumable = recipe.outputItem === "fuel_cell" || recipe.outputItem === "fuel_cell_premium";
-      const stockCeiling = isFleetConsumable ? 200 : isIntermediate ? 100 : 15;
+      const endProductCeiling = hasMarketData ? 50 : 10; // Tight cap without proven buyers
+      const stockCeiling = isFleetConsumable ? 200 : isIntermediate ? 200 : endProductCeiling;
 
       if (outputInStorage >= stockCeiling) {
         // Over ceiling: harsh penalty that scales with excess ratio
@@ -1725,7 +1752,7 @@ export class ScoringBrain implements CommanderBrain {
       const maxByCargo = best.heaviestStep > 0
         ? Math.floor(bot.cargoCapacity / best.heaviestStep)
         : 10;
-      const batchCount = Math.max(1, Math.min(maxByMaterials, maxByCargo, 5));
+      const batchCount = Math.max(1, Math.min(maxByMaterials, maxByCargo, 10));
       return {
         ...baseParams,
         recipeId: best.recipe.id,
@@ -1884,6 +1911,9 @@ export class ScoringBrain implements CommanderBrain {
         demandScore += deficit * 3; // Strong weight on crafter demand
         // Also factor in low storage (general need even without active crafter assignments)
         if (stock < 10) storageScore += (10 - stock) * 2;
+        // Surplus penalty — strongly avoid mining ores already overstocked
+        if (stock > 1000) storageScore -= Math.min(200, Math.round(stock / 50));
+        else if (stock > 100) storageScore -= Math.round(stock / 10);
       }
 
       poiScores.push({ poiType: norm, score: demandScore + storageScore });
@@ -1929,7 +1959,7 @@ export class ScoringBrain implements CommanderBrain {
         ? ["asteroid_belt", "asteroid"] : poiType === "gas_cloud"
         ? ["gas_cloud", "nebula"] : [poiType];
 
-      const candidates: Array<{ systemId: string; poiId: string; distance: number }> = [];
+      const candidates: Array<{ systemId: string; poiId: string; distance: number; balanceScore: number }> = [];
       for (const type of normalizedTypes) {
         const pois = this.galaxy.findPoisByType(type as import("../types/game").PoiType);
         for (const { systemId, poi } of pois) {
@@ -1940,14 +1970,32 @@ export class ScoringBrain implements CommanderBrain {
             ? (systemId === botSystem ? 0 : this.galaxy.getDistance(botSystem, systemId))
             : 99;
           if (distance < 0) continue; // Unreachable system
-          candidates.push({ systemId, poiId: poi.id, distance });
+
+          // Inventory balance: prefer belts whose resources are scarce in storage
+          let balanceScore = 0;
+          if (poi.resources.length > 0) {
+            for (const res of poi.resources) {
+              const stock = economy.factionStorage.get(res.resourceId) ?? 0;
+              if (stock < 100) balanceScore += 50;       // Scarce — high priority
+              else if (stock < 500) balanceScore += 20;
+              else if (stock < 1000) balanceScore += 0;
+              else if (stock < 5000) balanceScore -= 30;  // Overstocked — avoid
+              else balanceScore -= 80;                    // Massively overstocked — strongly avoid
+            }
+          }
+
+          candidates.push({ systemId, poiId: poi.id, distance, balanceScore });
         }
       }
 
       if (candidates.length === 0) continue;
 
-      // Pick closest
-      candidates.sort((a, b) => a.distance - b.distance);
+      // Sort by: balance score (prefer scarce ores), then distance as tiebreaker
+      candidates.sort((a, b) => {
+        const scoreDiff = b.balanceScore - a.balanceScore;
+        if (Math.abs(scoreDiff) > 10) return scoreDiff; // Balance matters more than distance
+        return a.distance - b.distance; // Close belts preferred when balance is similar
+      });
       const best = candidates[0];
 
       // Check if bot needs special equipment for this POI type

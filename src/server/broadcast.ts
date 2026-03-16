@@ -82,14 +82,26 @@ export function startBroadcastLoop(deps: BroadcastDeps): () => void {
     // Use the Commander's economy engine so revenue/costs appear in economy_update
     const ecoTracker = deps.commander.getEconomy();
     for (const bot of fleet.bots) {
-      if (bot.status !== "running") continue;
+      if (bot.status !== "running" && bot.status !== "ready") continue;
       const prev = lastCredits.get(bot.botId);
       if (prev !== undefined) {
-        const delta = bot.credits - prev;
+        let delta = bot.credits - prev;
+
+        // Exclude faction treasury transfers from revenue/cost tracking
+        const botInstance = deps.botManager.getBot(bot.botId);
+        if (botInstance) {
+          const factionWithdrawals = botInstance.drainFactionWithdrawals();
+          const factionDeposits = botInstance.drainFactionDeposits();
+          if (delta > 0) delta -= factionWithdrawals; // Withdraw inflates credits — subtract
+          if (delta < 0) delta += factionDeposits;     // Deposit deflates credits — add back
+        }
+
         if (delta > 0) {
           ecoTracker.recordRevenue(delta);
+          deps.trainingLogger?.logFinancialEvent("revenue", delta, bot.botId);
         } else if (delta < 0) {
           ecoTracker.recordCost(Math.abs(delta));
+          deps.trainingLogger?.logFinancialEvent("cost", Math.abs(delta), bot.botId);
         }
       }
       lastCredits.set(bot.botId, bot.credits);
@@ -140,15 +152,12 @@ export function startBroadcastLoop(deps: BroadcastDeps): () => void {
     // Fleet update (every 3s) — use full BotSummary (not FleetBotInfo) for dashboard
     const botSummaries = deps.botManager.getSummaries().map(b => {
       const snaps = botSnapshots.get(b.id) ?? [];
-      let creditsPerHour = 0;
-      if (snaps.length >= 4) {
-        const oldest = snaps[0];
-        const elapsed = Date.now() - oldest.timestamp;
-        if (elapsed > 0) {
-          creditsPerHour = Math.round(((b.credits - oldest.credits) / elapsed) * 3_600_000);
-        }
+      // Running total: credits earned since first snapshot (no extrapolation)
+      let creditsEarned = 0;
+      if (snaps.length >= 1) {
+        creditsEarned = b.credits - snaps[0].credits;
       }
-      return { ...b, creditsPerHour };
+      return { ...b, creditsPerHour: creditsEarned }; // Field name kept for backwards compat
     });
 
     broadcast({

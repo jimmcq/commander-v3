@@ -126,18 +126,30 @@ export class GameCache {
       catch (err) { console.warn("[Cache] Failed to init version:", err instanceof Error ? err.message : err); }
     }
 
-    const cachedRaw = this.getStatic("galaxy_map");
+    // Version-gated: only refetch galaxy when game version changes
+    const cachedRaw = this.getStatic("galaxy_map", this.gameVersion);
     let cachedCount = 0;
     if (cachedRaw) {
       const systems = JSON.parse(cachedRaw) as StarSystem[];
       cachedCount = systems.length;
       if (systems.length > 0) {
         const hasCoords = systems.some((s) => s.x !== 0 || s.y !== 0);
-        console.log(`[Cache] Galaxy from cache: ${systems.length} systems (coords=${hasCoords})`);
+        console.log(`[Cache] Galaxy from cache: ${systems.length} systems (coords=${hasCoords}, version=${this.gameVersion})`);
         return systems;
       }
       console.log(`[Cache] Galaxy cache empty — deleting`);
       this.deleteStatic("galaxy_map");
+    }
+
+    // Check for old version cache (migrate to current version without re-fetching)
+    const anyVersionRaw = this.getStatic("galaxy_map");
+    if (anyVersionRaw) {
+      const oldSystems = JSON.parse(anyVersionRaw) as StarSystem[];
+      if (oldSystems.length > 0) {
+        console.log(`[Cache] Galaxy from old version cache: ${oldSystems.length} systems — migrating to ${this.gameVersion}`);
+        this.setStatic("galaxy_map", anyVersionRaw, this.gameVersion);
+        return oldSystems;
+      }
     }
 
     console.log("[Cache] Fetching galaxy map from API...");
@@ -569,6 +581,39 @@ export class GameCache {
   /** Get all known facility-only recipe IDs */
   getFacilityOnlyRecipes(): string[] {
     return this.getAllByPrefix("facility_only:").map((r) => r.key.replace("facility_only:", ""));
+  }
+
+  /** Temporarily blacklist a recipe that failed to craft (10 min TTL) */
+  markRecipeFailed(recipeId: string): void {
+    this.setTimed(`recipe_failed:${recipeId}`, "1", 600_000); // 10 minutes
+  }
+
+  /** Check if a recipe is temporarily blacklisted */
+  isRecipeFailed(recipeId: string): boolean {
+    return this.getTimed(`recipe_failed:${recipeId}`) !== null;
+  }
+
+  // ── Material Unavailability (per-bot, persists across routine restarts) ──
+
+  /** Mark a material as unavailable for a specific bot (10 min TTL) */
+  markMaterialUnavailable(botId: string, itemId: string): void {
+    this.setTimed(`material_unavail:${botId}:${itemId}`, "1", 600_000); // 10 minutes
+  }
+
+  /** Check if a material is unavailable for a specific bot */
+  isMaterialUnavailable(botId: string, itemId: string): boolean {
+    return this.getTimed(`material_unavail:${botId}:${itemId}`) !== null;
+  }
+
+  /** Get all unavailable material IDs for a specific bot */
+  getUnavailableMaterials(botId: string): string[] {
+    const prefix = `material_unavail:${botId}:`;
+    const rows = this.db.select({ key: timedCache.key, fetchedAt: timedCache.fetchedAt, ttlMs: timedCache.ttlMs })
+      .from(timedCache).where(like(timedCache.key, `${prefix}%`)).all();
+    const now = Date.now();
+    return rows
+      .filter((r) => now - r.fetchedAt <= r.ttlMs)
+      .map((r) => r.key.replace(prefix, ""));
   }
 
   // ── Facility Material Needs (shared across QM, crafters, traders) ──

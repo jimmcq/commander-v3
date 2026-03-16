@@ -185,6 +185,8 @@ function ensureTables(sqlite: Database): void {
     )`);
     // Migration: add role column to existing bot_settings tables
     try { sqlite.run(`ALTER TABLE bot_settings ADD COLUMN role TEXT`); } catch { /* already exists */ }
+    // Migration: add manual_control column to existing bot_settings tables
+    try { sqlite.run(`ALTER TABLE bot_settings ADD COLUMN manual_control INTEGER NOT NULL DEFAULT 0`); } catch { /* already exists */ }
 
     // Financial events
     sqlite.run(`CREATE TABLE IF NOT EXISTS financial_events (

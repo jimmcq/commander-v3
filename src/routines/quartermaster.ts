@@ -62,6 +62,7 @@ const PROTECTED_MATERIALS = new Set([
   "steel_plate", "copper_wiring", "sensor_array",
   "thruster_nozzle", "power_battery", "ceramite_plating",
   "silver_wiring", "premium_fuel_cell",
+  "compressed_hydrogen", "liquid_hydrogen",
 ]);
 
 // Items that look like ship modules (don't sell these from faction storage)
@@ -364,7 +365,11 @@ async function* manageFactionSales(
     }
 
     const isOre = s.itemId.startsWith("ore_") || s.itemId.endsWith("_ore");
-    if (isOre && s.quantity < 5000) continue; // Keep ores for crafters unless overstocked
+    if (isOre) {
+      // Never sell raw ore — always refine through crafters first
+      // Ore is worth far more as crafted goods
+      continue;
+    }
 
     // Protect strategic crafting materials from being sold
     if (PROTECTED_MATERIALS.has(s.itemId)) continue;
@@ -407,6 +412,16 @@ async function* manageFactionSales(
     const modCount = storageItems.filter((s) => isModuleItem(s.itemId)).length;
     yield `faction storage: ${oreCount} ore type(s), ${modCount} module type(s) — nothing to sell`;
     return;
+  }
+
+  // Log what we found sellable for debugging
+  const oresSellable = sellable.filter((s) => s.itemId.startsWith("ore_") || s.itemId.endsWith("_ore"));
+  const nonOresSellable = sellable.filter((s) => !(s.itemId.startsWith("ore_") || s.itemId.endsWith("_ore")));
+  if (oresSellable.length > 0) {
+    yield `sellable ores: ${oresSellable.map((s) => `${s.itemId}(${s.quantity})`).join(", ")}`;
+  }
+  if (nonOresSellable.length > 0) {
+    yield `sellable goods: ${nonOresSellable.map((s) => `${s.itemId}(${s.quantity})`).join(", ")}`;
   }
 
   // Get competing prices at other stations
@@ -619,8 +634,10 @@ async function* manageFactionSales(
         // Check if ANY station has buy orders for this item (someone wants it)
         const hasBuyOrders = priceIndex.get(item.itemId)?.hasBuyVolume ?? false;
 
-        // List if: buy orders exist anywhere (demand confirmed), or per-unit price is reasonable
-        const worthListing = hasBuyOrders || listPrice >= 10;
+        // Items to dump at any price (list once to clear stock, never craft more)
+        const DUMP_ITEMS = new Set(["crimson_bloodwine"]);
+        // List if: buy orders exist anywhere (demand confirmed), per-unit price is reasonable, or dump item
+        const worthListing = hasBuyOrders || listPrice >= 10 || DUMP_ITEMS.has(item.itemId);
         if (worthListing) {
           // Re-deposit to faction storage first, then create faction sell order
           try {

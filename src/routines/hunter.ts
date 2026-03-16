@@ -37,7 +37,7 @@ import {
 // Weapon module patterns — hunter must have at least one actual combat weapon
 // Note: "weapon_" prefix distinguishes weapon_laser from mining_laser
 const WEAPON_PATTERNS = [
-  "weapon_", "cannon", "turret", "missile", "gun", "blaster", "railgun",
+  "weapon_", "cannon", "turret", "missile", "gun", "blaster", "railgun", "pulse_laser",
 ];
 
 /** Estimate combat power from ship stats (hull + shield + armor) */
@@ -177,7 +177,10 @@ export async function* hunter(ctx: BotContext): AsyncGenerator<RoutineYield, voi
     try {
       nearby = await ctx.api.getNearby();
     } catch (err) {
-      yield `scan failed: ${err instanceof Error ? err.message : String(err)}`;
+      const errMsg = err instanceof Error ? err.message : String(err);
+      yield `scan failed: ${errMsg}`;
+      // Backoff on rate limit or repeated failures — don't spam the API
+      await interruptibleSleep(ctx, errMsg.includes("rate_limit") ? 30_000 : 15_000);
       continue;
     }
 
@@ -193,6 +196,34 @@ export async function* hunter(ctx: BotContext): AsyncGenerator<RoutineYield, voi
 
       // ── Roam to next system after 1 idle cycle ──
       if (roam && !huntZone && idleCycles >= 1) {
+        // If fuel is low, dock and refuel before trying to roam
+        const fuelPct = ctx.ship.maxFuel > 0 ? (ctx.ship.fuel / ctx.ship.maxFuel) * 100 : 0;
+        if (fuelPct < 40) {
+          yield `fuel low (${Math.round(fuelPct)}%), docking to refuel`;
+          try {
+            await findAndDock(ctx);
+            await refuelIfNeeded(ctx);
+            if (ctx.player.dockedAtBase) {
+              await ctx.api.undock();
+              await ctx.refreshState();
+            }
+          } catch (err) {
+            yield `refuel trip failed: ${err instanceof Error ? err.message : String(err)}`;
+          }
+        }
+
+        // If galaxy data is missing for current system, fetch it
+        const neighbors = ctx.galaxy.getNeighbors(ctx.player.currentSystem);
+        if (neighbors.length === 0) {
+          yield "no galaxy data for current system, scanning";
+          try {
+            const sysData = await ctx.api.getSystem();
+            ctx.galaxy.updateSystem(sysData);
+          } catch (err) {
+            yield `system scan failed: ${err instanceof Error ? err.message : String(err)}`;
+          }
+        }
+
         const nextSystem = pickNextSystem(ctx, recentlyVisited);
         if (nextSystem) {
           yield `no targets — roaming to ${nextSystem.name}`;
@@ -206,7 +237,12 @@ export async function* hunter(ctx: BotContext): AsyncGenerator<RoutineYield, voi
             yield `roam failed: ${err instanceof Error ? err.message : String(err)}`;
           }
         } else {
-          yield "no reachable systems to roam to";
+          // Clear visited list in case all neighbors exhausted
+          recentlyVisited.clear();
+          yield "no reachable systems to roam to, waiting";
+          await interruptibleSleep(ctx, 120_000); // 2 min backoff to avoid log spam
+          yield typedYield("cycle_complete", { type: "cycle_complete", botId: ctx.botId, routine: "hunter" });
+          continue;
         }
       } else {
         yield "no targets found, patrolling";

@@ -371,9 +371,15 @@ export class Crafting {
   }
 
   /**
-   * Check if a recipe's full chain is manually craftable (no facility-only sub-steps).
+   * Check if a recipe's full chain is manually craftable
+   * (no facility-only sub-steps, no self-referential ingredients).
    */
   isChainViable(recipeId: string): boolean {
+    const recipe = this.recipeMap.get(recipeId);
+    if (recipe) {
+      // Self-referential: recipe requires its own output as input
+      if (recipe.ingredients.some(i => i.itemId === recipe.outputItem)) return false;
+    }
     const chain = this.resolveChain(recipeId);
     return chain.every(r => !this.facilityOnlyIds.has(r.id));
   }
@@ -389,12 +395,16 @@ export class Crafting {
     if (available.length === 0) return null;
 
     let best: Recipe | null = null;
-    let bestProfit = -Infinity;
+    let bestScore = -Infinity;
     for (const recipe of available) {
       if (!this.isChainViable(recipe.id)) continue;
       const { profit } = this.estimateMarketProfit(recipe.id);
-      if (profit > bestProfit) {
-        bestProfit = profit;
+      // Refining priority: boost recipes whose inputs are all raw ores
+      const allInputsRaw = recipe.ingredients.every(ing => this.isRawMaterial(ing.itemId));
+      const refiningBoost = allInputsRaw ? 1.5 : 1.0;
+      const score = profit * refiningBoost;
+      if (score > bestScore) {
+        bestScore = score;
         best = recipe;
       }
     }
@@ -411,14 +421,18 @@ export class Crafting {
     if (available.length === 0) return null;
 
     let best: Recipe | null = null;
-    let bestProfit = -Infinity;
+    let bestScore = -Infinity;
     for (const recipe of available) {
       if (!this.isChainViable(recipe.id)) continue;
       const plan = this.planCraft(recipe.id, 1, ship, skills);
       if (plan && plan.canCraft) {
         const { profit } = this.estimateMarketProfit(recipe.id);
-        if (profit > bestProfit) {
-          bestProfit = profit;
+        // Refining priority: boost recipes whose inputs are all raw ores
+        const allInputsRaw = recipe.ingredients.every(ing => this.isRawMaterial(ing.itemId));
+        const refiningBoost = allInputsRaw ? 1.5 : 1.0;
+        const score = profit * refiningBoost;
+        if (score > bestScore) {
+          bestScore = score;
           best = recipe;
         }
       }
@@ -544,5 +558,68 @@ export class Crafting {
 
     resolve(recipeId);
     return chain;
+  }
+
+  /**
+   * Score how well a recipe's raw material needs can be met by available inventory.
+   * Returns a ratio 0.0–1.0 where 1.0 means all raw materials are fully available.
+   * Useful for prioritizing recipes we can actually craft with current faction storage.
+   */
+  materialAvailability(recipeId: string, inventory: Map<string, number>, batchCount = 1): number {
+    const rawMats = this.getRawMaterials(recipeId, batchCount);
+    if (rawMats.size === 0) return 1.0;
+
+    let totalNeeded = 0;
+    let totalAvailable = 0;
+    for (const [itemId, needed] of rawMats) {
+      const have = inventory.get(itemId) ?? 0;
+      if (have === 0) return 0; // Any missing material = can't craft at all
+      totalNeeded += needed;
+      totalAvailable += Math.min(have, needed);
+    }
+
+    return totalNeeded > 0 ? totalAvailable / totalNeeded : 0;
+  }
+
+  /**
+   * Find the best recipe considering both profit and material availability.
+   * Scores recipes by: profit * availability — ensuring we pick recipes we can
+   * actually complete with materials on hand, while still preferring profitable ones.
+   * Only returns recipes with >0 material availability.
+   */
+  findBestSourceableRecipe(
+    skills: Record<string, number>,
+    inventory: Map<string, number>,
+    excludeIds?: Set<string>,
+  ): { recipe: Recipe; profit: number; availability: number } | null {
+    const available = this.getAvailableRecipes(skills);
+    if (available.length === 0) return null;
+
+    let best: { recipe: Recipe; profit: number; availability: number } | null = null;
+    let bestScore = -Infinity;
+
+    for (const recipe of available) {
+      if (excludeIds?.has(recipe.id)) continue;
+      if (!this.isChainViable(recipe.id)) continue;
+
+      const avail = this.materialAvailability(recipe.id, inventory);
+      if (avail <= 0) continue; // Skip recipes with any missing material
+
+      const { profit } = this.estimateMarketProfit(recipe.id);
+      // Strongly prefer 100% sourceable recipes — partial recipes waste ticks failing
+      // availability² penalizes partial availability; 100% = full score, 50% = 25% score
+      // Refining priority: boost recipes whose inputs are all raw ores — convert ores first
+      // before crafting higher-tier items that consume refined goods
+      const allInputsRaw = recipe.ingredients.every(ing => this.isRawMaterial(ing.itemId));
+      const refiningBoost = allInputsRaw ? 1.5 : 1.0;
+      const score = profit * (avail * avail) * refiningBoost;
+
+      if (score > bestScore) {
+        bestScore = score;
+        best = { recipe, profit, availability: avail };
+      }
+    }
+
+    return best;
   }
 }

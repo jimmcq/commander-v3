@@ -1,6 +1,24 @@
 <script lang="ts">
 	import { bots, send } from "$stores/websocket";
 
+	const ROLE_LABELS: Record<string, string> = {
+		ore_miner: "Miner-Ore",
+		crystal_miner: "Miner-Crystal",
+		gas_harvester: "Miner-Gas",
+		ice_harvester: "Miner-Ice",
+		explorer: "Explorer",
+		trader: "Trader",
+		crafter: "Crafter",
+		quartermaster: "Quartermaster",
+		hunter: "Hunter",
+		mission_runner: "Mission Runner",
+		ship_dealer: "Ship Dealer",
+		shipwright: "Crafter-Shipwright",
+	};
+	function roleDisplayName(role: string): string {
+		return ROLE_LABELS[role] ?? role.replace(/_/g, " ");
+	}
+
 	let showAddDialog = $state(false);
 	let newUsername = $state("");
 	let newPassword = $state("");
@@ -141,7 +159,7 @@
 						{#if bot.role}
 						<div class="flex justify-between">
 							<span class="text-chrome-silver">Role</span>
-							<span class="text-plasma-cyan text-[10px] px-1.5 py-0.5 rounded bg-plasma-cyan/10 border border-plasma-cyan/20">{bot.role.replace(/_/g, ' ')}</span>
+							<span class="text-plasma-cyan text-[10px] px-1.5 py-0.5 rounded bg-plasma-cyan/10 border border-plasma-cyan/20">{roleDisplayName(bot.role)}</span>
 						</div>
 						{/if}
 						<div class="flex justify-between">

@@ -232,6 +232,7 @@ export async function startup(config: AppConfig): Promise<AppServices> {
       saveBotSettings(db, bot.username, bot.settings);
     },
     recoverErrorBots: () => botManager.recoverStuckBots(),
+    isBotManual: (botId: string) => botManager.getBot(botId)?.settings.manualControl ?? false,
   };
 
   const commander = new Commander(commanderConfig, commanderDeps, brain);
@@ -261,16 +262,26 @@ export async function startup(config: AppConfig): Promise<AppServices> {
 
   // ── Load Bot Credentials ──
   const savedBots = sessionStore.listBots();
+  const manualBotIds = new Set<string>();
   for (const creds of savedBots) {
     const bot = botManager.addBot(creds.username);
     const settings = loadBotSettings(db, creds.username);
     if (settings) {
       bot.settings = settings;
       if (settings.role) bot.role = settings.role;
+      if (settings.manualControl) manualBotIds.add(bot.id);
     }
   }
   if (savedBots.length > 0) {
     console.log(`[Fleet] Loaded ${savedBots.length} bots from session store`);
+
+    // Auto-login all non-manual bots so Commander can assign routines immediately
+    botManager.loginAll(manualBotIds).then(({ success, failed }) => {
+      if (success.length > 0) console.log(`[Fleet] Auto-started ${success.length} bots: ${success.join(", ")}`);
+      if (failed.length > 0) console.log(`[Fleet] Failed to start ${failed.length} bots: ${failed.map(f => `${f.username}: ${f.error}`).join(", ")}`);
+    }).catch(err => {
+      console.error(`[Fleet] Auto-start error: ${err instanceof Error ? err.message : err}`);
+    });
   }
 
   // ── Galaxy + Catalog Loading ──

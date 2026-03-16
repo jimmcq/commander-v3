@@ -12,7 +12,7 @@ import {
   FUEL_CELL_MAX_PRICE, FUEL_SAFETY_MARGIN, FUEL_LOW_BURN_THRESHOLD,
   REPAIR_THRESHOLD, REPAIR_SERVICE_THRESHOLD, MODULE_REPAIR_THRESHOLD,
   EMERGENCY_HULL_THRESHOLD, INSURANCE_MAX_WALLET_PCT, INSURANCE_DURATION_TICKS,
-  MAX_MATERIAL_BUY_PRICE, INSIGHT_GATE_PRICE, STORAGE_COLLECT_INTERVAL_MS,
+  MAX_MATERIAL_BUY_PRICE, INSIGHT_GATE_PRICE,
   MINE_REFRESH_INTERVAL,
 } from "../config/constants";
 
@@ -302,21 +302,6 @@ export async function dockAtCurrent(ctx: BotContext): Promise<void> {
     // Analyze market for insights (rate-limited — at most once per 30min per station)
     await analyzeMarketIfStale(ctx);
 
-    // Collect credits from station storage periodically (not every dock — saves API calls)
-    const now = Date.now();
-    const ctxExt = ctx as unknown as Record<string, unknown>;
-    const lastCollect = (ctxExt.__lastStorageCollect as number) ?? 0;
-    if (now - lastCollect > STORAGE_COLLECT_INTERVAL_MS) {
-      ctxExt.__lastStorageCollect = now;
-      try {
-        const storage = await ctx.api.viewStorageTyped();
-        if (storage.credits > 0) {
-          await ctx.api.withdrawCredits(storage.credits);
-          await ctx.refreshState();
-          log(ctx, `collected ${storage.credits}cr from station storage`);
-        }
-      } catch (err) { logWarn(ctx, `storage credit collect failed: ${err instanceof Error ? err.message : err}`); }
-    }
   }
 }
 
@@ -1463,6 +1448,7 @@ export async function payFactionTax(ctx: BotContext, earned: number): Promise<{ 
   try {
     await ctx.api.factionDepositCredits(taxAmount);
     await ctx.refreshState();
+    ctx.recordFactionDeposit(taxAmount); // Exclude from cost tracking
     // Log to faction transactions via logger (if available)
     ctx.logger.logFactionCreditTx?.("credit_deposit", ctx.botId, taxAmount, `tax ${pct}%`);
     return { deposited: taxAmount, message: `faction tax: deposited ${taxAmount}cr (${pct}%)` };
@@ -1513,6 +1499,7 @@ export async function depositExcessCredits(ctx: BotContext): Promise<{ deposited
   try {
     await ctx.api.factionDepositCredits(excess);
     await ctx.refreshState();
+    ctx.recordFactionDeposit(excess); // Exclude from cost tracking
     ctx.logger.logFactionCreditTx?.("credit_deposit", ctx.botId, excess, `max credits cap`);
     return { deposited: excess, message: `deposited ${excess}cr to faction treasury (credits exceeded ${maxCredits}cr cap)` };
   } catch (err) {
@@ -1521,22 +1508,3 @@ export async function depositExcessCredits(ctx: BotContext): Promise<{ deposited
   }
 }
 
-/**
- * Check personal station storage for credits and withdraw them.
- * Call when docked — credits sitting in station storage are idle.
- */
-export async function collectStorageCredits(ctx: BotContext): Promise<{ collected: number; message: string }> {
-  if (!ctx.player.dockedAtBase) return { collected: 0, message: "" };
-
-  try {
-    const storage = await ctx.api.viewStorageTyped();
-    if (storage.credits <= 0) return { collected: 0, message: "" };
-
-    await ctx.api.withdrawCredits(storage.credits);
-    await ctx.refreshState();
-    return { collected: storage.credits, message: `collected ${storage.credits}cr from station storage` };
-  } catch (err) {
-    log(ctx, `storage credit collection failed: ${err instanceof Error ? err.message : String(err)}`);
-    return { collected: 0, message: "" };
-  }
-}

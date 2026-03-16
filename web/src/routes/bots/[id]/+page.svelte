@@ -203,7 +203,7 @@
 				<p class="text-lg font-bold mono text-star-white">{bot.credits.toLocaleString()}</p>
 			</div>
 			<div class="card p-3 text-center">
-				<p class="text-xs text-chrome-silver">cr/hr</p>
+				<p class="text-xs text-chrome-silver">Earned</p>
 				<p class="text-lg font-bold mono {bot.creditsPerHour >= 0 ? 'text-bio-green' : 'text-claw-red'}">
 					{bot.creditsPerHour >= 0 ? "+" : ""}{bot.creditsPerHour.toLocaleString()}
 				</p>

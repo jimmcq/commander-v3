@@ -635,10 +635,12 @@ export class ApiClient {
     return this.mutation("withdraw_items", { item_id: itemId, quantity });
   }
 
+  /** @deprecated Credits are now wallet-only — deposit_credits returns error */
   async depositCredits(amount: number): Promise<Record<string, unknown>> {
     return this.mutation("deposit_credits", { amount });
   }
 
+  /** @deprecated Credits are now wallet-only — withdraw_credits returns error */
   async withdrawCredits(amount: number): Promise<Record<string, unknown>> {
     return this.mutation("withdraw_credits", { amount });
   }

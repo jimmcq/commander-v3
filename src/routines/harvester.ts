@@ -161,15 +161,31 @@ export async function* harvester(ctx: BotContext): AsyncGenerator<RoutineYield, 
 
       if (ctx.shouldStop) return;
 
+      // Scan POI resources and persist to cache
+      try {
+        const poiDetail = await ctx.api.getPoi();
+        if (poiDetail.resources.length > 0) {
+          ctx.galaxy.updatePoiResources(target.poiId, poiDetail.resources);
+        }
+      } catch {
+        // Non-fatal: continue harvesting even if POI scan fails
+      }
+
       // Mine/harvest at this location
       {
         let mineCount = 0;
-        while (!ctx.shouldStop && ctx.cargo.hasSpace(ctx.ship, 1)) {
+        while (!ctx.shouldStop) {
+          // Refresh before check every 5 mines to avoid stale cargo_full errors
+          if (mineCount > 0 && mineCount % 5 === 0) {
+            await ctx.refreshState();
+          }
+          if (!ctx.cargo.hasSpace(ctx.ship, 1)) break;
+
           yield `harvesting ${resourceType}`;
           try {
             const result = await ctx.api.mine();
             mineCount++;
-            if (mineCount % 5 === 0 || result.quantity === 0 || result.remaining === 0) {
+            if (result.quantity === 0 || result.remaining === 0) {
               await ctx.refreshState();
             }
 

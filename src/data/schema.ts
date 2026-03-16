@@ -169,6 +169,7 @@ export const botSettings = sqliteTable("bot_settings", {
   storageMode: text("storage_mode").notNull().default("sell"),
   factionStorage: integer("faction_storage").notNull().default(0),
   role: text("role"),
+  manualControl: integer("manual_control").notNull().default(0),
   updatedAt: text("updated_at").default(sql`(datetime('now'))`),
 });
 

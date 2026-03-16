@@ -93,6 +93,7 @@ export interface BotSummary {
     maxCargoFillPct: number;
     storageMode: "sell" | "deposit" | "faction_deposit";
     factionStorage: boolean;
+    manualControl: boolean;
   };
   description: string | null;
   activeMissions: Array<{ id: string; title: string; type: string; objectives: Array<{ description: string; progress: number; target: number; complete: boolean }> }>;
@@ -533,4 +534,5 @@ export type ClientMessage =
   | { type: "cancel_facility_build"; facilityType: string }
   | { type: "buy_ship_upgrade"; botId: string; shipClass: string }
   | { type: "buy_module"; botId: string; moduleId: string }
-  | { type: "set_bot_role"; botId: string; role: string | null };
+  | { type: "set_bot_role"; botId: string; role: string | null }
+  | { type: "set_manual_control"; botId: string; enabled: boolean };

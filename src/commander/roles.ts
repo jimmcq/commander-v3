@@ -15,6 +15,7 @@ import type { RoutineName } from "../types/protocol";
 
 export const BOT_ROLES = [
   "ore_miner",
+  "crystal_miner",
   "gas_harvester",
   "ice_harvester",
   "explorer",
@@ -43,6 +44,7 @@ const ONE_SHOT_ROUTINES: RoutineName[] = ["return_home", "refit", "ship_upgrade"
 
 const ROLE_CORE_ROUTINES: Record<BotRole, RoutineName[]> = {
   ore_miner:      ["miner"],
+  crystal_miner:  ["miner"],
   gas_harvester:  ["harvester"],
   ice_harvester:  ["harvester"],
   explorer:       ["explorer", "scout"],
@@ -67,6 +69,7 @@ export function getAllowedRoutines(role: BotRole): RoutineName[] {
  *  Order matters: first items are highest priority. */
 export const ROLE_MODULES: Record<BotRole | "default", string[]> = {
   ore_miner:      ["mining_laser", "mining_laser", "cargo_expander", "autocannon", "shield_booster"],
+  crystal_miner:  ["mining_laser", "mining_laser", "cargo_expander", "shield_booster"],
   gas_harvester:  ["gas_harvester", "gas_harvester", "cargo_expander", "shield_booster"],
   ice_harvester:  ["ice_harvester", "ice_harvester", "cargo_expander", "shield_booster"],
   explorer:       ["survey_scanner", "ship_scanner", "afterburner"],
@@ -86,6 +89,7 @@ export const ROLE_MODULES: Record<BotRole | "default", string[]> = {
  *  Commander will upgrade bots along this progression as budget allows. */
 export const ROLE_SHIPS: Record<BotRole, string[]> = {
   ore_miner:      ["theoria", "archimedes"],
+  crystal_miner:  ["theoria", "archimedes"],
   gas_harvester:  ["theoria", "archimedes"],
   ice_harvester:  ["theoria", "archimedes"],
   explorer:       ["sparrow", "viper"],
@@ -110,6 +114,7 @@ export interface RolePoolConfig {
 /** Default pool sizing — used when config doesn't specify */
 export const DEFAULT_POOL_CONFIG: RolePoolConfig[] = [
   { role: "ore_miner",      min: 1, max: 3, preferredShip: "archimedes" },
+  { role: "crystal_miner",  min: 0, max: 2, preferredShip: "archimedes" },
   { role: "gas_harvester",   min: 0, max: 1, preferredShip: "archimedes" },
   { role: "ice_harvester",   min: 0, max: 1, preferredShip: "archimedes" },
   { role: "explorer",        min: 1, max: 2, preferredShip: "viper" },
@@ -121,6 +126,29 @@ export const DEFAULT_POOL_CONFIG: RolePoolConfig[] = [
   { role: "ship_dealer",    min: 0, max: 1, preferredShip: "archimedes" },
   { role: "shipwright",     min: 0, max: 1, preferredShip: "archimedes" },
 ];
+
+// ── Display Names ──
+
+/** Human-friendly labels for the dashboard. Keyed by BotRole. */
+export const ROLE_DISPLAY_NAMES: Record<BotRole, string> = {
+  ore_miner:      "Miner-Ore",
+  crystal_miner:  "Miner-Crystal",
+  gas_harvester:  "Miner-Gas",
+  ice_harvester:  "Miner-Ice",
+  explorer:       "Explorer",
+  trader:         "Trader",
+  crafter:        "Crafter",
+  quartermaster:  "Quartermaster",
+  hunter:         "Hunter",
+  mission_runner: "Mission Runner",
+  ship_dealer:    "Ship Dealer",
+  shipwright:     "Crafter-Shipwright",
+};
+
+/** Get display name for a role (falls back to raw role with underscores replaced) */
+export function roleDisplayName(role: string): string {
+  return ROLE_DISPLAY_NAMES[role as BotRole] ?? role.replace(/_/g, " ");
+}
 
 /** Map a legacy routine name to the new BotRole (for backward compat) */
 export function routineToRole(routine: string): BotRole {

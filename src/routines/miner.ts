@@ -35,12 +35,40 @@ export async function* miner(ctx: BotContext): AsyncGenerator<RoutineYield, void
   let targetBelt = getParam(ctx, "targetBelt", "");
   let sellStation = getParam(ctx, "sellStation", "");
   const targetOre = getParam(ctx, "targetOre", "");
-  const depositToStorage = getParam(ctx, "depositToStorage", false);
+  // Crystal miners always deposit to faction storage (crystals are strategic, not for sale)
+  const depositToStorage = ctx.settings.role === "crystal_miner" ? true : getParam(ctx, "depositToStorage", false);
   const equipModules = getParam<string[]>(ctx, "equipModules", []);
   const unequipModules = getParam<string[]>(ctx, "unequipModules", []);
 
   // ── Equip/unequip modules if commanded by scoring brain ──
   yield* equipModulesForRoutine(ctx, equipModules, unequipModules);
+
+  // Crystal miners default to known crystal nebula locations if no target specified
+  if (!targetBelt && ctx.settings.role === "crystal_miner") {
+    const { KNOWN_RESOURCE_LOCATIONS } = await import("../config/constants");
+    const crystalLoc = KNOWN_RESOURCE_LOCATIONS.find(loc =>
+      loc.resources.some(r => r.resourceId === "energy_crystal" || r.resourceId === "phase_crystal")
+    );
+    if (crystalLoc) {
+      // Ensure POI is registered in galaxy so navigateToPoi can resolve it
+      const existingPoi = ctx.galaxy.getSystemForPoi(crystalLoc.poiId);
+      if (!existingPoi) {
+        ctx.galaxy.hydrateFromPersistedPois([{
+          poiId: crystalLoc.poiId,
+          systemId: crystalLoc.systemId,
+          poi: {
+            id: crystalLoc.poiId,
+            name: crystalLoc.poiName,
+            type: crystalLoc.poiType as any,
+            hasBase: false, baseId: null, baseName: null,
+            resources: crystalLoc.resources.map(r => ({ resourceId: r.resourceId, richness: r.richness, remaining: 9999 })),
+          },
+        }]);
+      }
+      targetBelt = crystalLoc.poiId;
+      yield `crystal miner — targeting ${crystalLoc.poiName} in ${crystalLoc.systemId}`;
+    }
+  }
 
   // Auto-discover targets if not provided
   if (!targetBelt || !sellStation) {
@@ -58,7 +86,7 @@ export async function* miner(ctx: BotContext): AsyncGenerator<RoutineYield, void
         const hasMiningLaser = ctx.ship.modules.some((m) =>
           m.moduleId.includes("mining_laser") || m.name.toLowerCase().includes("mining laser")
         );
-        const belt = system.pois.find((p) =>
+        const mineablePois = system.pois.filter((p) =>
           !ctx.galaxy.isPoiDepleted(p.id) && (
             p.type === "asteroid_belt" || p.type === "asteroid"
             || (p.type === "ice_field" && hasIceHarvester)
@@ -66,6 +94,11 @@ export async function* miner(ctx: BotContext): AsyncGenerator<RoutineYield, void
             || (p.type === "nebula" && (hasGasHarvester || hasMiningLaser))
           )
         );
+        // Crystal miners prefer nebulae (sort them first)
+        if (ctx.settings.role === "crystal_miner") {
+          mineablePois.sort((a, b) => (a.type === "nebula" ? -1 : 1) - (b.type === "nebula" ? -1 : 1));
+        }
+        const belt = mineablePois[0];
         if (belt) {
           targetBelt = belt.id;
           yield `found belt: ${belt.name}`;
@@ -102,7 +135,7 @@ export async function* miner(ctx: BotContext): AsyncGenerator<RoutineYield, void
     if (allBelts.length === 0) {
       yield "galaxy cache cold — fetching map...";
       try {
-        const systems = await ctx.api.getMap();
+        const systems = await ctx.cache.getMap(ctx.api);
         for (const sys of systems) ctx.galaxy.updateSystem(sys);
         allBelts = [
           ...ctx.galaxy.findPoisByType("asteroid_belt"),
@@ -116,6 +149,8 @@ export async function* miner(ctx: BotContext): AsyncGenerator<RoutineYield, void
     }
     // Sort by ROI: prefer belts with stations nearby (for selling) and short distance
     // Belts in systems with a station score higher (no wasted travel to sell)
+    // crystal_miner role strongly prefers nebulae for energy/phase crystals
+    const isCrystalMiner = ctx.settings.role === "crystal_miner";
     const botSystem = ctx.player.currentSystem;
     if (botSystem) {
       allBelts.sort((a, b) => {
@@ -128,7 +163,10 @@ export async function* miner(ctx: BotContext): AsyncGenerator<RoutineYield, void
         const sysB = ctx.galaxy.getSystem(b.systemId);
         const hasStationA = sysA?.pois.some(p => p.hasBase) ? 0 : 2; // +2 jump penalty if no station
         const hasStationB = sysB?.pois.some(p => p.hasBase) ? 0 : 2;
-        return (da + hasStationA) - (db + hasStationB);
+        // Crystal miners get -10 distance bonus for nebulae (strongly prefer them)
+        const nebulaA = isCrystalMiner && a.poi.type === "nebula" ? -10 : 0;
+        const nebulaB = isCrystalMiner && b.poi.type === "nebula" ? -10 : 0;
+        return (da + hasStationA + nebulaA) - (db + hasStationB + nebulaB);
       });
     }
     const nearestBelt = allBelts[0];
@@ -177,19 +215,37 @@ export async function* miner(ctx: BotContext): AsyncGenerator<RoutineYield, void
 
     if (ctx.shouldStop) return;
 
+    // ── Scan POI resources and persist to cache ──
+    try {
+      const poiDetail = await ctx.api.getPoi();
+      if (poiDetail.resources.length > 0) {
+        ctx.galaxy.updatePoiResources(targetBelt, poiDetail.resources);
+      }
+    } catch (err) {
+      // Non-fatal: continue mining even if POI scan fails
+      const msg = err instanceof Error ? err.message : String(err);
+      yield `poi scan failed (non-fatal): ${msg}`;
+    }
+
     // ── Mine until full ──
     const cargoBeforeMining = ctx.ship.cargo.reduce((sum, c) => sum + c.quantity, 0);
     let beltDepleted = false;
 
     {
       let mineCount = 0;
-      while (!ctx.shouldStop && ctx.cargo.hasSpace(ctx.ship, 1)) {
+      while (!ctx.shouldStop) {
+        // Refresh before check every 5 mines to avoid stale cargo_full errors
+        if (mineCount > 0 && mineCount % 5 === 0) {
+          await ctx.refreshState();
+        }
+        if (!ctx.cargo.hasSpace(ctx.ship, 1)) break;
+
         yield `mining${targetOre ? ` ${targetOre}` : ""}`;
         try {
           const result = await ctx.api.mine();
           mineCount++;
-          // Refresh every 5 mines or on depletion (saves ~80% of query calls in mining loop)
-          if (mineCount % 5 === 0 || result.quantity === 0 || result.remaining === 0) {
+          // Refresh on depletion
+          if (result.quantity === 0 || result.remaining === 0) {
             await ctx.refreshState();
           }
 

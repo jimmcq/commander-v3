@@ -141,6 +141,8 @@ export class BotManager {
   /** Recover bots stuck in error or stopping state */
   async recoverStuckBots(): Promise<void> {
     for (const bot of this.bots.values()) {
+      // Skip bots under manual control — player manages their state
+      if (bot.settings.manualControl) continue;
       if (bot.status === "error") {
         console.log(`[${bot.username}] recovering from error state: ${bot.error}`);
         try {
@@ -248,9 +250,9 @@ export class BotManager {
    * Login all idle bots with staggered timing.
    * Returns array of bots that failed to login.
    */
-  async loginAll(): Promise<{ success: string[]; failed: Array<{ username: string; error: string }> }> {
+  async loginAll(excludeBotIds?: Set<string>): Promise<{ success: string[]; failed: Array<{ username: string; error: string }> }> {
     const idleBots = Array.from(this.bots.values()).filter(
-      (b) => b.status === "idle" || b.status === "error"
+      (b) => (b.status === "idle" || b.status === "error") && !excludeBotIds?.has(b.id)
     );
 
     const success: string[] = [];
@@ -385,9 +387,12 @@ export class BotManager {
               }
             }
 
-            // Wire POI persistence callback
+            // Wire POI persistence callbacks
             this.services.galaxy.onPoisDiscovered = (systemId, pois) => {
               this.services.cache.persistSystemPois(systemId, pois);
+            };
+            this.services.galaxy.onPoiResourcesUpdated = (poiId, systemId, poi) => {
+              this.services.cache.persistPoi(poiId, systemId, poi);
             };
 
             // If API doesn't provide coordinates, generate a force-directed layout

@@ -42,6 +42,8 @@ export interface BotSettings {
   factionStorage: boolean;
   /** Specialist role — locks bot to role-specific routines */
   role: string | null;
+  /** When true, commander skips this bot entirely — for manual player control */
+  manualControl: boolean;
 }
 
 // ── Routine Types ──
@@ -135,5 +137,6 @@ export interface BotContext {
 
   refreshState: () => Promise<void>;
   recordFactionWithdrawal: (amount: number) => void;
+  recordFactionDeposit: (amount: number) => void;
   setActiveMissions: (missions: Array<{ id: string; title: string; type: string; objectives: Array<{ description: string; progress: number; target: number; complete: boolean }> }>) => void;
 }

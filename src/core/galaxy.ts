@@ -22,6 +22,8 @@ export class Galaxy {
   private resourceIndex = new Map<string, Set<string>>();
   /** Callback for POI persistence — wired by startup to persist discoveries to DB */
   onPoisDiscovered?: (systemId: string, pois: PoiSummary[]) => void;
+  /** Callback for individual POI resource updates — persists resource data when discovered */
+  onPoiResourcesUpdated?: (poiId: string, systemId: string, poi: PoiSummary) => void;
   /** Dirty flag: set when galaxy data changes, cleared after broadcast */
   dirty = true;
 
@@ -335,6 +337,10 @@ export class Galaxy {
         set.add(poiId);
       }
       this.dirty = true;
+      // Persist updated POI resource data to DB
+      if (this.onPoiResourcesUpdated) {
+        this.onPoiResourcesUpdated(poiId, entry.systemId, entry.poi);
+      }
     }
   }
 

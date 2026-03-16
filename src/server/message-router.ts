@@ -125,13 +125,24 @@ export function handleClientMessage(
       case "start_all_bots": {
         (async () => {
           try {
-            const result = await botManager.loginAll();
+            // Skip bots under manual control — they are player-driven
+            const manualBotIds = new Set(
+              botManager.getAllBots()
+                .filter(b => b.settings.manualControl)
+                .map(b => b.id)
+            );
+            if (manualBotIds.size > 0) {
+              const names = botManager.getAllBots().filter(b => manualBotIds.has(b.id)).map(b => b.username);
+              console.log(`[Fleet] start_all_bots skipping ${manualBotIds.size} manual-control bot(s): ${names.join(", ")}`);
+            }
+
+            const result = await botManager.loginAll(manualBotIds);
             if (result.success.length > 0) {
               await deps.ensureGalaxyLoaded();
               // Trigger home discovery now that bots have player data
               await deps.runDiscovery();
               await commander.forceEvaluation();
-              broadcast({ type: "notification", level: "info", title: "Fleet started", message: `${result.success.length} bot(s) online` });
+              broadcast({ type: "notification", level: "info", title: "Fleet started", message: `${result.success.length} bot(s) online${manualBotIds.size > 0 ? ` (${manualBotIds.size} manual skipped)` : ""}` });
             }
             for (const fail of result.failed) {
               broadcast({ type: "notification", level: "warning", title: `Login failed: ${fail.username}`, message: fail.error });
@@ -516,6 +527,17 @@ export function handleClientMessage(
           saveBotSettings(db, bot.username, bot.settings);
           console.log(`[WS] Set bot ${msg.botId} role → ${msg.role ?? "generalist"}`);
           broadcast({ type: "notification", level: "info", title: "Role updated", message: `${bot.username} is now ${msg.role ?? "generalist"}` });
+        }
+        break;
+      }
+
+      case "set_manual_control": {
+        const bot = botManager.getBot(msg.botId);
+        if (bot) {
+          bot.settings.manualControl = msg.enabled;
+          saveBotSettings(db, bot.username, bot.settings);
+          console.log(`[WS] Set bot ${msg.botId} manualControl → ${msg.enabled}`);
+          broadcast({ type: "notification", level: "info", title: "Manual control", message: `${bot.username} manual control ${msg.enabled ? "enabled" : "disabled"}` });
         }
         break;
       }

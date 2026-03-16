@@ -16,7 +16,7 @@ export function registerTradeTracker(bus: EventBus, logger: TrainingLogger): voi
       total: event.total,
       stationId: event.stationId,
     });
-    logger.logFinancialEvent("cost", event.total, event.botId);
+    // Financial event logged by broadcast loop's credit delta tracking (single source of truth)
   });
 
   bus.on("trade_sell", (event) => {
@@ -29,6 +29,6 @@ export function registerTradeTracker(bus: EventBus, logger: TrainingLogger): voi
       total: event.total,
       stationId: event.stationId,
     });
-    logger.logFinancialEvent("revenue", event.total, event.botId);
+    // Financial event logged by broadcast loop's credit delta tracking (single source of truth)
   });
 }

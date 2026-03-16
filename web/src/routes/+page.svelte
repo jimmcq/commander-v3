@@ -2,6 +2,25 @@
 	import { bots, fleetStats, commanderLog, activityLog, connectionState, economy } from "$stores/websocket";
 	import CreditsChart from "$lib/components/CreditsChart.svelte";
 
+	const ROLE_LABELS: Record<string, string> = {
+		ore_miner: "Miner-Ore",
+		crystal_miner: "Miner-Crystal",
+		gas_harvester: "Miner-Gas",
+		ice_harvester: "Miner-Ice",
+		explorer: "Explorer",
+		trader: "Trader",
+		crafter: "Crafter",
+		quartermaster: "Quartermaster",
+		hunter: "Hunter",
+		mission_runner: "Mission Runner",
+		ship_dealer: "Ship Dealer",
+		shipwright: "Crafter-Shipwright",
+	};
+	function roleLabel(role: string | null): string {
+		if (!role) return "--";
+		return ROLE_LABELS[role] ?? role.replace(/_/g, " ");
+	}
+
 	// Derive top trades from activity log (merged from Activity page)
 	const topTrades = $derived.by(() => {
 		return $activityLog
@@ -44,14 +63,14 @@
 			</p>
 		</div>
 		<div class="card p-4">
-			<p class="text-xs text-chrome-silver uppercase tracking-wider">Income Rate</p>
+			<p class="text-xs text-chrome-silver uppercase tracking-wider">Session Earned</p>
 			<p class="text-2xl font-bold mono {$fleetStats && $fleetStats.creditsPerHour >= 0 ? 'text-bio-green' : 'text-claw-red'} mt-1">
 				{#if $fleetStats}
 					{$fleetStats.creditsPerHour >= 0 ? '+' : ''}{$fleetStats.creditsPerHour.toLocaleString()}
 				{:else}
 					---
 				{/if}
-				<span class="text-sm text-chrome-silver">cr/hr</span>
+				<span class="text-sm text-chrome-silver">earned</span>
 			</p>
 		</div>
 		<div class="card p-4">
@@ -97,12 +116,13 @@
 								<tr class="text-left text-xs text-chrome-silver uppercase tracking-wider border-b border-hull-grey/30">
 									<th class="pb-2 pr-4">Status</th>
 									<th class="pb-2 pr-4">Bot</th>
+									<th class="pb-2 pr-4">Role</th>
 									<th class="pb-2 pr-4">Ship</th>
 									<th class="pb-2 pr-4">Routine</th>
 									<th class="pb-2 pr-4">State</th>
 									<th class="pb-2 pr-4">Location</th>
 									<th class="pb-2 pr-4 text-right">Credits</th>
-									<th class="pb-2 pr-4 text-right">cr/hr</th>
+									<th class="pb-2 pr-4 text-right">Earned</th>
 									<th class="pb-2 pr-4 text-right">Fuel</th>
 									<th class="pb-2 text-right">Cargo</th>
 								</tr>
@@ -123,6 +143,9 @@
 											<a href="/bots/{bot.id}" class="text-star-white hover:text-plasma-cyan font-medium">
 												{bot.username}
 											</a>
+										</td>
+										<td class="py-2 pr-4">
+											<span class="text-plasma-cyan text-[10px] px-1.5 py-0.5 rounded bg-plasma-cyan/10 border border-plasma-cyan/20">{roleLabel(bot.role)}</span>
 										</td>
 										<td class="py-2 pr-4 text-chrome-silver text-xs">
 											{bot.shipName ?? bot.shipClass ?? "--"}
