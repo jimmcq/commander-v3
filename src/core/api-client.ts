@@ -160,6 +160,10 @@ export class ApiClient {
       new Date(Date.now() + 30 * 60 * 1000).toISOString()
     );
 
+    if (!data.player || !data.ship) {
+      throw new ApiError("login_failed", `Login returned null player/ship for ${this.username} — account may be deleted`);
+    }
+
     return {
       sessionId: this.sessionId!,
       player: normalizePlayer(data.player),

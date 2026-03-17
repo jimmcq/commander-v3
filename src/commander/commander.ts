@@ -394,6 +394,26 @@ export class Commander {
       }
     }
 
+    // Step 0.8: Ensure recipe + item catalogs are loaded (cold-start: crafters need recipes)
+    if (this.deps.crafting.recipeCount === 0) {
+      const api = this.deps.getApi?.();
+      if (api && this.deps.cache) {
+        try {
+          const [recipes, items] = await Promise.all([
+            this.deps.cache.getRecipes(api),
+            this.deps.cache.getItemCatalog(api),
+          ]);
+          this.deps.crafting.load(recipes);
+          this.deps.crafting.loadItems(items);
+          const facilityOnly = this.deps.cache.getFacilityOnlyRecipes();
+          if (facilityOnly.length > 0) {
+            this.deps.crafting.setFacilityOnlyRecipes(facilityOnly);
+          }
+          console.log(`[Commander] Recipe catalog auto-loaded: ${recipes.length} recipes, ${items.length} items${facilityOnly.length > 0 ? `, ${facilityOnly.length} facility-only excluded` : ""}`);
+        } catch { /* will retry next cycle */ }
+      }
+    }
+
     // Step 1: Get fleet state (exclude bots under manual control)
     const rawFleet = this.deps.getFleetStatus();
     const manualBots = rawFleet.bots.filter(b => this.deps.isBotManual?.(b.botId));

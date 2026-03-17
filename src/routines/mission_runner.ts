@@ -369,6 +369,7 @@ export async function* mission_runner(ctx: BotContext): AsyncGenerator<RoutineYi
     // Resume an active mission if we have one (check feasibility first)
     const activeMission = activeMissions.find(m => {
       if (!m.objectives.some(o => !o.complete)) return false;
+      if (abandonedTitles.has(m.title)) return false;
       const check = canCompleteMission(ctx, m, maxJumps, skipCombat);
       return check.ok;
     });
@@ -376,6 +377,10 @@ export async function* mission_runner(ctx: BotContext): AsyncGenerator<RoutineYi
       yield `resuming active mission: ${activeMission.title}`;
       const result = yield* executeMission(ctx, activeMission, hubStation);
       if (result === "stop") return;
+      if (result === "failed") {
+        abandonedTitles.add(activeMission.title);
+        yield `will not re-accept "${activeMission.title}" this session`;
+      }
       yield typedYield("cycle_complete", { type: "cycle_complete", botId: ctx.botId, routine: "mission_runner" });
       continue;
     }
@@ -560,9 +565,9 @@ async function* executeMission(
     }
 
     if (!active) {
-      // Mission disappeared — might have been auto-completed
+      // Mission disappeared — might have been auto-completed, or API inconsistency
       yield "mission no longer active (may be complete)";
-      return "done";
+      return cycles <= 1 ? "failed" : "done";
     }
 
     // Check if all objectives complete

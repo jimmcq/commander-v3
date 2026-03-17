@@ -29,5 +29,11 @@ const shutdown = () => {
 
 process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);
+process.on("unhandledRejection", (err) => {
+  console.error("[App] Unhandled rejection (keeping alive):", err instanceof Error ? err.message : err);
+});
+process.on("uncaughtException", (err) => {
+  console.error("[App] Uncaught exception (keeping alive):", err.message);
+});
 
 console.log("[App] Commander v3 ready.");
