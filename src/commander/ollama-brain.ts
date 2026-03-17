@@ -212,6 +212,32 @@ class OllamaNativeBrain implements CommanderBrain {
     };
   }
 
+  /** Simple text generation for chat message rewriting, formatting, etc. */
+  async think(prompt: string, system?: string): Promise<string> {
+    const response = await fetch(`${this.baseUrl}/api/chat`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: this.model,
+        think: false,
+        stream: false,
+        messages: [
+          { role: "system", content: system ?? "You are a helpful assistant." },
+          { role: "user", content: prompt },
+        ],
+        options: { num_predict: 256 },
+      }),
+      signal: AbortSignal.timeout(this.timeoutMs),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Ollama HTTP ${response.status}: ${await response.text()}`);
+    }
+
+    const data = await response.json() as { message?: { content?: string } };
+    return data.message?.content ?? "";
+  }
+
   private recordHealth(success: boolean, latencyMs: number): void {
     this.successes.push(success);
     this.latencies.push(latencyMs);
