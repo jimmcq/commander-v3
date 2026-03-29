@@ -130,7 +130,7 @@ function ensureSqliteTables(sqlite: Database): void {
     sqlite.run(`CREATE TABLE IF NOT EXISTS decision_log (
       id INTEGER PRIMARY KEY AUTOINCREMENT, tick INTEGER NOT NULL, bot_id TEXT NOT NULL,
       action TEXT NOT NULL, params TEXT, context TEXT NOT NULL, result TEXT, commander_goal TEXT,
-      game_version TEXT NOT NULL, commander_version TEXT NOT NULL, schema_version INTEGER NOT NULL DEFAULT 1,
+      game_version TEXT NOT NULL, commander_version TEXT NOT NULL, schema_version INTEGER NOT NULL DEFAULT 1, tenant_id TEXT NOT NULL DEFAULT 'default',
       created_at TEXT DEFAULT (datetime('now'))
     )`);
     sqlite.run("CREATE INDEX IF NOT EXISTS idx_decision_log_bot ON decision_log(bot_id)");
@@ -139,7 +139,7 @@ function ensureSqliteTables(sqlite: Database): void {
     sqlite.run(`CREATE TABLE IF NOT EXISTS state_snapshots (
       id INTEGER PRIMARY KEY AUTOINCREMENT, tick INTEGER NOT NULL, bot_id TEXT NOT NULL,
       player_state TEXT NOT NULL, ship_state TEXT NOT NULL, location TEXT NOT NULL,
-      game_version TEXT NOT NULL, commander_version TEXT NOT NULL, schema_version INTEGER NOT NULL DEFAULT 1,
+      game_version TEXT NOT NULL, commander_version TEXT NOT NULL, schema_version INTEGER NOT NULL DEFAULT 1, tenant_id TEXT NOT NULL DEFAULT 'default',
       created_at TEXT DEFAULT (datetime('now'))
     )`);
     sqlite.run("CREATE INDEX IF NOT EXISTS idx_snapshots_bot ON state_snapshots(bot_id)");
@@ -149,7 +149,7 @@ function ensureSqliteTables(sqlite: Database): void {
       start_tick INTEGER NOT NULL, end_tick INTEGER NOT NULL, duration_ticks INTEGER NOT NULL,
       start_credits INTEGER, end_credits INTEGER, profit INTEGER, route TEXT, items_involved TEXT,
       fuel_consumed INTEGER, risks TEXT, commander_goal TEXT, success INTEGER NOT NULL DEFAULT 1,
-      game_version TEXT NOT NULL, commander_version TEXT NOT NULL, schema_version INTEGER NOT NULL DEFAULT 1,
+      game_version TEXT NOT NULL, commander_version TEXT NOT NULL, schema_version INTEGER NOT NULL DEFAULT 1, tenant_id TEXT NOT NULL DEFAULT 'default',
       created_at TEXT DEFAULT (datetime('now'))
     )`);
     sqlite.run("CREATE INDEX IF NOT EXISTS idx_episodes_bot ON episodes(bot_id)");
@@ -165,41 +165,43 @@ function ensureSqliteTables(sqlite: Database): void {
     sqlite.run(`CREATE TABLE IF NOT EXISTS commander_log (
       id INTEGER PRIMARY KEY AUTOINCREMENT, tick INTEGER NOT NULL, goal TEXT NOT NULL,
       fleet_state TEXT NOT NULL, assignments TEXT NOT NULL, reasoning TEXT NOT NULL, economy_state TEXT,
-      game_version TEXT NOT NULL, commander_version TEXT NOT NULL, schema_version INTEGER NOT NULL DEFAULT 1,
+      game_version TEXT NOT NULL, commander_version TEXT NOT NULL, schema_version INTEGER NOT NULL DEFAULT 1, tenant_id TEXT NOT NULL DEFAULT 'default',
       created_at TEXT DEFAULT (datetime('now'))
     )`);
     sqlite.run("CREATE INDEX IF NOT EXISTS idx_commander_tick ON commander_log(tick)");
     sqlite.run(`CREATE TABLE IF NOT EXISTS bot_sessions (
-      username TEXT PRIMARY KEY, password TEXT NOT NULL, empire TEXT, player_id TEXT,
+      username TEXT NOT NULL, tenant_id TEXT NOT NULL DEFAULT 'default', password TEXT NOT NULL, empire TEXT, player_id TEXT,
       session_id TEXT, session_expires_at TEXT,
-      created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now'))
+      created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now')),
+      PRIMARY KEY (tenant_id, username)
     )`);
     sqlite.run(`CREATE TABLE IF NOT EXISTS credit_history (
       id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp INTEGER NOT NULL,
-      total_credits INTEGER NOT NULL, active_bots INTEGER NOT NULL
+      total_credits INTEGER NOT NULL, active_bots INTEGER NOT NULL, tenant_id TEXT NOT NULL DEFAULT 'default'
     )`);
     sqlite.run("CREATE INDEX IF NOT EXISTS idx_credit_ts ON credit_history(timestamp)");
     sqlite.run(`CREATE TABLE IF NOT EXISTS goals (
       id INTEGER PRIMARY KEY AUTOINCREMENT, type TEXT NOT NULL, priority INTEGER NOT NULL,
-      params TEXT NOT NULL DEFAULT '{}', constraints TEXT
+      params TEXT NOT NULL DEFAULT '{}', constraints TEXT, tenant_id TEXT NOT NULL DEFAULT 'default'
     )`);
     sqlite.run(`CREATE TABLE IF NOT EXISTS bot_settings (
-      username TEXT PRIMARY KEY, fuel_emergency_threshold REAL NOT NULL DEFAULT 20,
+      username TEXT NOT NULL, tenant_id TEXT NOT NULL DEFAULT 'default', fuel_emergency_threshold REAL NOT NULL DEFAULT 20,
       auto_repair INTEGER NOT NULL DEFAULT 1, max_cargo_fill_pct REAL NOT NULL DEFAULT 90,
       storage_mode TEXT NOT NULL DEFAULT 'sell', faction_storage INTEGER NOT NULL DEFAULT 0,
       role TEXT, manual_control INTEGER NOT NULL DEFAULT 0,
-      updated_at TEXT DEFAULT (datetime('now'))
+      updated_at TEXT DEFAULT (datetime('now')),
+      PRIMARY KEY (tenant_id, username)
     )`);
     sqlite.run(`CREATE TABLE IF NOT EXISTS financial_events (
       id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp INTEGER NOT NULL, event_type TEXT NOT NULL,
-      amount REAL NOT NULL, bot_id TEXT, source TEXT
+      amount REAL NOT NULL, bot_id TEXT, source TEXT, tenant_id TEXT NOT NULL DEFAULT 'default'
     )`);
     sqlite.run("CREATE INDEX IF NOT EXISTS idx_financial_ts ON financial_events(timestamp)");
     sqlite.run("CREATE INDEX IF NOT EXISTS idx_financial_type ON financial_events(event_type)");
     sqlite.run(`CREATE TABLE IF NOT EXISTS trade_log (
       id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp INTEGER NOT NULL, bot_id TEXT NOT NULL,
       action TEXT NOT NULL, item_id TEXT NOT NULL, quantity INTEGER NOT NULL,
-      price_each REAL NOT NULL, total REAL NOT NULL, station_id TEXT
+      price_each REAL NOT NULL, total REAL NOT NULL, station_id TEXT, tenant_id TEXT NOT NULL DEFAULT 'default'
     )`);
     sqlite.run("CREATE INDEX IF NOT EXISTS idx_trade_ts ON trade_log(timestamp)");
     sqlite.run("CREATE INDEX IF NOT EXISTS idx_trade_bot ON trade_log(bot_id)");
@@ -211,7 +213,7 @@ function ensureSqliteTables(sqlite: Database): void {
       id INTEGER PRIMARY KEY AUTOINCREMENT, tick INTEGER NOT NULL, brain_name TEXT NOT NULL,
       latency_ms INTEGER NOT NULL, confidence REAL, token_usage INTEGER,
       fleet_input TEXT NOT NULL, assignments TEXT NOT NULL, reasoning TEXT,
-      scoring_brain_assignments TEXT, agreement_rate REAL,
+      scoring_brain_assignments TEXT, agreement_rate REAL, tenant_id TEXT NOT NULL DEFAULT 'default',
       created_at TEXT DEFAULT (datetime('now'))
     )`);
     sqlite.run("CREATE INDEX IF NOT EXISTS idx_llm_tick ON llm_decisions(tick)");
@@ -224,31 +226,34 @@ function ensureSqliteTables(sqlite: Database): void {
     sqlite.run("CREATE INDEX IF NOT EXISTS idx_poi_system ON poi_cache(system_id)");
     sqlite.run(`CREATE TABLE IF NOT EXISTS faction_transactions (
       id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp INTEGER NOT NULL, bot_id TEXT,
-      type TEXT NOT NULL, item_id TEXT, item_name TEXT, quantity INTEGER, credits REAL, details TEXT
+      type TEXT NOT NULL, item_id TEXT, item_name TEXT, quantity INTEGER, credits REAL, details TEXT, tenant_id TEXT NOT NULL DEFAULT 'default'
     )`);
     sqlite.run("CREATE INDEX IF NOT EXISTS idx_faction_tx_ts ON faction_transactions(timestamp)");
     sqlite.run("CREATE INDEX IF NOT EXISTS idx_faction_tx_type ON faction_transactions(type)");
     sqlite.run(`CREATE TABLE IF NOT EXISTS activity_log (
       id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp INTEGER NOT NULL,
-      level TEXT NOT NULL DEFAULT 'info', bot_id TEXT, message TEXT NOT NULL, details TEXT
+      level TEXT NOT NULL DEFAULT 'info', bot_id TEXT, message TEXT NOT NULL, details TEXT, tenant_id TEXT NOT NULL DEFAULT 'default'
     )`);
     sqlite.run("CREATE INDEX IF NOT EXISTS idx_activity_ts ON activity_log(timestamp)");
     sqlite.run("CREATE INDEX IF NOT EXISTS idx_activity_bot ON activity_log(bot_id)");
     sqlite.run(`CREATE TABLE IF NOT EXISTS commander_memory (
-      key TEXT PRIMARY KEY, fact TEXT NOT NULL, importance INTEGER NOT NULL DEFAULT 5,
-      updated_at TEXT DEFAULT (datetime('now'))
+      key TEXT NOT NULL, tenant_id TEXT NOT NULL DEFAULT 'default', fact TEXT NOT NULL, importance INTEGER NOT NULL DEFAULT 5,
+      updated_at TEXT DEFAULT (datetime('now')),
+      PRIMARY KEY (tenant_id, key)
     )`);
     sqlite.run(`CREATE TABLE IF NOT EXISTS bot_skills (
-      username TEXT PRIMARY KEY, skills TEXT NOT NULL, updated_at TEXT DEFAULT (datetime('now'))
+      username TEXT NOT NULL, tenant_id TEXT NOT NULL DEFAULT 'default', skills TEXT NOT NULL, updated_at TEXT DEFAULT (datetime('now')),
+      PRIMARY KEY (tenant_id, username)
     )`);
     sqlite.run(`CREATE TABLE IF NOT EXISTS bandit_weights (
-      role TEXT PRIMARY KEY, weights TEXT NOT NULL, covariance TEXT NOT NULL,
-      episode_count INTEGER NOT NULL DEFAULT 0, updated_at TEXT DEFAULT (datetime('now'))
+      role TEXT NOT NULL, tenant_id TEXT NOT NULL DEFAULT 'default', weights TEXT NOT NULL, covariance TEXT NOT NULL,
+      episode_count INTEGER NOT NULL DEFAULT 0, updated_at TEXT DEFAULT (datetime('now')),
+      PRIMARY KEY (tenant_id, role)
     )`);
     sqlite.run(`CREATE TABLE IF NOT EXISTS bandit_episodes (
       id INTEGER PRIMARY KEY AUTOINCREMENT, role TEXT NOT NULL, routine TEXT NOT NULL,
       context TEXT NOT NULL, reward REAL NOT NULL, reward_breakdown TEXT NOT NULL DEFAULT '{}',
-      duration_sec REAL NOT NULL, goal_type TEXT, bot_id TEXT NOT NULL,
+      duration_sec REAL NOT NULL, goal_type TEXT, bot_id TEXT NOT NULL, tenant_id TEXT NOT NULL DEFAULT 'default',
       created_at TEXT DEFAULT (datetime('now'))
     )`);
     sqlite.run("CREATE INDEX IF NOT EXISTS idx_bandit_ep_role ON bandit_episodes(role)");
@@ -256,7 +261,7 @@ function ensureSqliteTables(sqlite: Database): void {
     sqlite.run("CREATE INDEX IF NOT EXISTS idx_bandit_ep_created ON bandit_episodes(created_at)");
     sqlite.run(`CREATE TABLE IF NOT EXISTS outcome_embeddings (
       id INTEGER PRIMARY KEY AUTOINCREMENT, text TEXT NOT NULL, embedding TEXT NOT NULL,
-      category TEXT NOT NULL, metadata TEXT NOT NULL DEFAULT '{}', profit_impact REAL,
+      category TEXT NOT NULL, metadata TEXT NOT NULL DEFAULT '{}', profit_impact REAL, tenant_id TEXT NOT NULL DEFAULT 'default',
       created_at TEXT DEFAULT (datetime('now'))
     )`);
     sqlite.run("CREATE INDEX IF NOT EXISTS idx_embed_category ON outcome_embeddings(category)");
