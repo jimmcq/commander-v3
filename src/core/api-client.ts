@@ -160,8 +160,8 @@ export class ApiClient {
       new Date(Date.now() + 30 * 60 * 1000).toISOString()
     );
 
-    if (!data.player || !data.ship) {
-      throw new ApiError("login_failed", `Login returned null player/ship for ${this.username} — account may be deleted`);
+    if (!data.player) {
+      throw new ApiError("login_failed", `Login returned null player for ${this.username} — account may be deleted`);
     }
 
     return {
@@ -1465,7 +1465,8 @@ function normalizeStats(raw?: Record<string, unknown>): PlayerState["stats"] {
   };
 }
 
-function normalizeShip(raw: Record<string, unknown>): ShipState {
+function normalizeShip(raw: Record<string, unknown> | null | undefined): ShipState {
+  if (!raw || typeof raw !== "object") raw = {};
   return {
     id: str(raw.id),
     ownerId: str(raw.owner_id),

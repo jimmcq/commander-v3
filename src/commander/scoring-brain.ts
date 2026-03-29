@@ -26,6 +26,7 @@ import { scoreShipForRole, LEGACY_SHIPS } from "../core/ship-fitness";
 import { getStrategyWeights } from "./strategies";
 import { getAllowedRoutines, parseBotRole, getModulesForRole } from "./roles";
 import type { BotRole } from "./roles";
+import type { BanditBrain } from "./bandit-brain";
 
 const ALL_ROUTINES: RoutineName[] = [
   "miner", "crafter", "trader", "quartermaster", "explorer",
@@ -129,6 +130,8 @@ export class ScoringBrain implements CommanderBrain {
   /** Persistent tracking of active miner/harvester → belt assignments across eval cycles */
   private activeBeltAssignments = new Map<string, string>(); // botId → beltPoiId
   private beltAssignmentTimestamps = new Map<string, number>(); // botId → timestamp
+  /** Contextual bandit — learns base weights from outcomes (optional) */
+  banditBrain: BanditBrain | null = null;
 
   constructor(config?: Partial<ScoringConfig>) {
     this.config = { ...DEFAULT_CONFIG, ...config };
@@ -222,8 +225,11 @@ export class ScoringBrain implements CommanderBrain {
         ? activeRoutines.filter((r) => getAllowedRoutines(botRole).includes(r))
         : activeRoutines; // Generalist (no role) scores all routines
       for (const routine of botRoutines) {
-        // Early skip: routine has 0 base score AND no pending work (ship_upgrade/refit already filtered above)
-        const baseScore = this.config.baseScores[routine] * weights[routine];
+        // Base score: use bandit-learned weight if available, else hardcoded default
+        const banditScore = this.banditBrain
+          ? this.banditBrain.getScore(botRole ?? "generalist", routine, bot, economy, goals, candidates.length, this.homeSystem)
+          : null;
+        const baseScore = (banditScore ?? this.config.baseScores[routine]) * weights[routine];
         if (baseScore <= 0 && routine !== "return_home") continue;
 
         // Early skip: bot has active rapid penalty for this routine (it just failed)
@@ -590,10 +596,15 @@ export class ScoringBrain implements CommanderBrain {
     weights: StrategyWeights,
     economy: EconomySnapshot,
     fleet: FleetStatus,
-    world?: WorldContext
+    world?: WorldContext,
+    goals?: Goal[],
   ): BotScore {
-    // 1. Base score × strategy weight
-    const baseScore = this.config.baseScores[routine] * weights[routine];
+    // 1. Base score × strategy weight (bandit-learned or hardcoded default)
+    const botRole = parseBotRole(bot.role);
+    const banditScore = this.banditBrain
+      ? this.banditBrain.getScore(botRole ?? "generalist", routine, bot, economy, goals ?? [], fleet.bots.length, this.homeSystem)
+      : null;
+    const baseScore = (banditScore ?? this.config.baseScores[routine]) * weights[routine];
 
     // 2. Supply chain bonus: deficit detection boosts relevance
     const supplyBonus = this.calcSupplyBonus(routine, economy);
@@ -1867,8 +1878,8 @@ export class ScoringBrain implements CommanderBrain {
     // ── Demand-driven mining: figure out what ores crafters actually need ──
     // Map: POI type → ore prefixes found there
     const POI_ORE_MAP: Record<string, string[]> = {
-      asteroid_belt: ["ore_iron", "ore_copper", "ore_titanium", "ore_gold", "ore_nickel", "ore_sol"],
-      asteroid: ["ore_iron", "ore_copper", "ore_titanium", "ore_gold", "ore_nickel", "ore_sol"],
+      asteroid_belt: ["ore_iron", "ore_copper", "ore_titanium", "ore_gold", "ore_nickel", "ore_sol", "silicon_ore", "iron_ore", "copper_ore"],
+      asteroid: ["ore_iron", "ore_copper", "ore_titanium", "ore_gold", "ore_nickel", "ore_sol", "silicon_ore", "iron_ore", "copper_ore"],
       ice_field: ["ore_ice"],
       gas_cloud: ["ore_crystal", "ore_gas", "energy_crystal", "phase_crystal", "quantum_fragments"],
       nebula: ["ore_crystal", "ore_gas", "energy_crystal", "phase_crystal", "quantum_fragments"],

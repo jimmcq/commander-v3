@@ -291,6 +291,43 @@ export const botSkills = sqliteTable("bot_skills", {
   updatedAt: text("updated_at").default(sql`(datetime('now'))`),
 });
 
+// ── Bandit Learning (per-role contextual bandit weights + episode rewards) ──
+
+export const banditWeights = sqliteTable("bandit_weights", {
+  role: text("role").primaryKey(),
+  /** JSON: Record<routineName, number[]> — weight vector per arm */
+  weights: text("weights").notNull(),
+  /** JSON: Record<routineName, number[][]> — inverse covariance matrix per arm */
+  covariance: text("covariance").notNull(),
+  /** Total episodes observed for this role */
+  episodeCount: integer("episode_count").notNull().default(0),
+  updatedAt: text("updated_at").default(sql`(datetime('now'))`),
+});
+
+export const banditEpisodes = sqliteTable("bandit_episodes", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  /** Bot role that ran this episode */
+  role: text("role").notNull(),
+  /** Routine that was executed */
+  routine: text("routine").notNull(),
+  /** Context vector at decision time (JSON float array) */
+  context: text("context").notNull(),
+  /** Composite reward received */
+  reward: real("reward").notNull(),
+  /** Reward breakdown (JSON: { credits, xp, items, strategic, ... }) */
+  rewardBreakdown: text("reward_breakdown").notNull().default("{}"),
+  /** Episode duration in seconds */
+  durationSec: real("duration_sec").notNull(),
+  /** Active goal type at decision time */
+  goalType: text("goal_type"),
+  botId: text("bot_id").notNull(),
+  createdAt: text("created_at").default(sql`(datetime('now'))`),
+}, (table) => [
+  index("idx_bandit_ep_role").on(table.role),
+  index("idx_bandit_ep_routine").on(table.routine),
+  index("idx_bandit_ep_created").on(table.createdAt),
+]);
+
 // ── Outcome Embeddings (semantic memory for strategic decisions) ──
 
 export const outcomeEmbeddings = sqliteTable("outcome_embeddings", {

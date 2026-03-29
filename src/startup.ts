@@ -61,7 +61,7 @@ export interface AppServices {
  */
 export async function startup(config: AppConfig): Promise<AppServices> {
   // ── Data Layer ──
-  const { db, sqlite } = createDatabase("commander.db");
+  const { db, sqlite } = createDatabase(config._dbPath ?? "commander.db");
   const trainingLogger = new TrainingLogger(db);
   const gameCache = new GameCache(db, trainingLogger);
   const shipyardCount = gameCache.loadShipyardData();
@@ -202,6 +202,11 @@ export async function startup(config: AppConfig): Promise<AppServices> {
   // ── Persistent Memory Store (inspired by CHAPERON) ──
   const memoryStore = new MemoryStore(db);
 
+  // ── Contextual Bandit (learns per-role routine weights from outcomes) ──
+  const { BanditBrain } = await import("./commander/bandit-brain");
+  const banditBrain = new BanditBrain(db, { alpha: 0.5 });
+  console.log(`[Startup] Bandit brain loaded: ${banditBrain.getTotalEpisodes()} historical episodes`);
+
   // ── Embedding Store (semantic memory for strategic decisions) ──
   const embeddingStore = new EmbeddingStore(db, {
     ollamaUrl: config.ai.ollama_base_url,
@@ -256,6 +261,13 @@ export async function startup(config: AppConfig): Promise<AppServices> {
   };
 
   const commander = new Commander(commanderConfig, commanderDeps, brain);
+
+  // Attach bandit brain to scoring brain (learns base weights from outcomes)
+  const scoringBrain = commander.getScoringBrain?.() ?? (brain instanceof ScoringBrain ? brain : null);
+  if (scoringBrain) {
+    (scoringBrain as any).banditBrain = banditBrain;
+    console.log("[Startup] Bandit brain attached to scoring brain");
+  }
 
   // Load role pool config from config.toml
   if (config.fleet.roles.length > 0) {
@@ -333,6 +345,26 @@ export async function startup(config: AppConfig): Promise<AppServices> {
       }
     }
   };
+
+  // ── Hydrate known resource locations into galaxy (silicon, crystals, etc.) ──
+  const { KNOWN_RESOURCE_LOCATIONS } = await import("./config/constants");
+  for (const loc of KNOWN_RESOURCE_LOCATIONS) {
+    const existing = galaxy.getSystemForPoi(loc.poiId);
+    if (!existing) {
+      galaxy.hydrateFromPersistedPois([{
+        poiId: loc.poiId,
+        systemId: loc.systemId,
+        poi: {
+          id: loc.poiId,
+          name: loc.poiName,
+          type: loc.poiType as any,
+          hasBase: false, baseId: null, baseName: null,
+          resources: loc.resources.map(r => ({ resourceId: r.resourceId, richness: r.richness, remaining: 9999 })),
+        },
+      }]);
+      console.log(`[Startup] Hydrated known POI: ${loc.poiName} (${loc.systemId}) — ${loc.resources.map(r => r.resourceId).join(", ")}`);
+    }
+  }
 
   // ── Faction Discovery (async, non-blocking, retries every 60s) ──
   let discoveryTimer: ReturnType<typeof setInterval> | null = null;

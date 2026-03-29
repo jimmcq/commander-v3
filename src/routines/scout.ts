@@ -37,6 +37,8 @@ import {
  */
 const DEFAULT_TRADE_HUBS = [
   "sol", "nova_terra", "sirius", "procyon", "alpha_centauri", "nexus_prime",
+  "haven",           // Silicon ore at Commerce Fields — critical for circuit boards
+  "market_prime",    // Haven neighbor — Nebula Trade Federation hub
 ];
 
 /** Scan all stations in the current system, returns count of stations scanned */

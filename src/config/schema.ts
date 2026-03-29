@@ -161,4 +161,7 @@ export const AppConfigSchema = z.object({
   inventory_targets: z.array(StockTargetSchema).default([]),
 });
 
-export type AppConfig = z.infer<typeof AppConfigSchema>;
+export type AppConfig = z.infer<typeof AppConfigSchema> & {
+  /** Runtime override: database path (from CLI --db flag) */
+  _dbPath?: string;
+};

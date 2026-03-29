@@ -294,6 +294,30 @@ function ensureTables(sqlite: Database): void {
       updated_at TEXT DEFAULT (datetime('now'))
     )`);
 
+    // Bandit learning (per-role contextual bandit)
+    sqlite.run(`CREATE TABLE IF NOT EXISTS bandit_weights (
+      role TEXT PRIMARY KEY,
+      weights TEXT NOT NULL,
+      covariance TEXT NOT NULL,
+      episode_count INTEGER NOT NULL DEFAULT 0,
+      updated_at TEXT DEFAULT (datetime('now'))
+    )`);
+    sqlite.run(`CREATE TABLE IF NOT EXISTS bandit_episodes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      role TEXT NOT NULL,
+      routine TEXT NOT NULL,
+      context TEXT NOT NULL,
+      reward REAL NOT NULL,
+      reward_breakdown TEXT NOT NULL DEFAULT '{}',
+      duration_sec REAL NOT NULL,
+      goal_type TEXT,
+      bot_id TEXT NOT NULL,
+      created_at TEXT DEFAULT (datetime('now'))
+    )`);
+    sqlite.run("CREATE INDEX IF NOT EXISTS idx_bandit_ep_role ON bandit_episodes(role)");
+    sqlite.run("CREATE INDEX IF NOT EXISTS idx_bandit_ep_routine ON bandit_episodes(routine)");
+    sqlite.run("CREATE INDEX IF NOT EXISTS idx_bandit_ep_created ON bandit_episodes(created_at)");
+
     // Outcome embeddings (semantic memory for strategic decisions)
     sqlite.run(`CREATE TABLE IF NOT EXISTS outcome_embeddings (
       id INTEGER PRIMARY KEY AUTOINCREMENT,

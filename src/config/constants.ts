@@ -81,4 +81,16 @@ export const KNOWN_RESOURCE_LOCATIONS: Array<{ systemId: string; poiId: string; 
       { resourceId: "phase_crystal", richness: 18 },
     ],
   },
+  {
+    systemId: "haven",
+    poiId: "commerce_fields",
+    poiName: "Commerce Fields",
+    poiType: "asteroid_belt",
+    resources: [
+      { resourceId: "silicon_ore", richness: 70 },
+      { resourceId: "iron_ore", richness: 75 },
+      { resourceId: "copper_ore", richness: 65 },
+      { resourceId: "nickel_ore", richness: 55 },
+    ],
+  },
 ];

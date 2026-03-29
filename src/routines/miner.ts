@@ -379,20 +379,19 @@ export async function* miner(ctx: BotContext): AsyncGenerator<RoutineYield, void
       return;
     }
 
-    // ── Return to station ──
-    // Determine disposal mode first (affects station choice)
-    // When depositToStorage is true, always use faction storage (supply chain)
+    // ── Return to home station ──
+    // Always return to faction storage station (home base) when cargo full.
+    // Depositing at remote stations wastes materials — faction lockbox is only at home.
     const mode = depositToStorage
       ? "faction_deposit"
       : ctx.settings.storageMode;
 
-    // Pick the right station: faction storage station > sell station > auto-find
     const factionStation = ctx.fleetConfig.factionStorageStation;
-    const targetStation = (mode === "faction_deposit" && factionStation)
-      ? factionStation
-      : sellStation;
+    const homeBase = ctx.fleetConfig.homeBase;
+    // Priority: faction storage station > home base > sell station > auto-find
+    const targetStation = factionStation || homeBase || sellStation;
 
-    yield "returning to station";
+    yield `returning to ${targetStation ? "home base" : "nearest station"}`;
     try {
       if (targetStation) {
         await navigateAndDock(ctx, targetStation);

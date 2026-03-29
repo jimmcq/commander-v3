@@ -25,6 +25,8 @@ import type { MemoryStore } from "../data/memory-store";
 import type { StuckBot } from "../types/protocol";
 import { type BotRole, type RolePoolConfig, DEFAULT_POOL_CONFIG, parseBotRole, routineToRole } from "./roles";
 import { EmbeddingStore, type OutcomeCategory } from "./embedding-store";
+import { extractContext } from "./bandit-brain";
+import { computeReward, emptySignals } from "./reward-function";
 import { StrategicTriggerEngine, type StrategicTrigger } from "./strategic-triggers";
 import { buildStrategicSystemPrompt, buildStrategicUserPrompt, parseLlmResponse } from "./prompt-builder";
 
@@ -100,6 +102,8 @@ export class Commander {
   private _evaluating = false;
   /** Role pool sizing config */
   private _poolConfig: RolePoolConfig[] = DEFAULT_POOL_CONFIG;
+  /** Bandit reward tracking: per-bot snapshot at last eval (for computing deltas) */
+  private _botSnapshots = new Map<string, { credits: number; routine: string | null; role: string | null; startTick: number }>();
   /** Strategic trigger engine — decides when to call LLM */
   private triggerEngine = new StrategicTriggerEngine();
   /** Last strategic trigger (for dashboard) */
@@ -234,7 +238,7 @@ export class Commander {
   }
 
   /** Find the ScoringBrain inside any brain (direct, tiered, or shadow) */
-  private getScoringBrain(): ScoringBrain | null {
+  getScoringBrain(): ScoringBrain | null {
     if (this.brain instanceof ScoringBrain) return this.brain;
     // TieredBrain: check tiers and shadowBrain
     if ("tiers" in this.brain) {
@@ -657,6 +661,9 @@ export class Commander {
         );
       }
     }
+
+    // Step 5c: Feed bandit with reward from completed routine cycles
+    this.feedBanditRewards(fleet, economySnapshot);
 
     // Step 6: Build decision record
     const decision: CommanderDecision = {
@@ -1410,6 +1417,54 @@ export class Commander {
           netProfit: economy.netProfit,
         },
       }).catch(() => {}); // Fire and forget
+    }
+  }
+
+  /**
+   * Feed bandit brain with rewards from completed routine cycles.
+   * Compares bot state now vs snapshot from last eval to compute credit delta.
+   * Only feeds when a bot has changed routine (indicating cycle completion).
+   */
+  private feedBanditRewards(fleet: FleetStatus, economy: import("./types").EconomySnapshot): void {
+    const scoringBrain = this.getScoringBrain();
+    const bandit = scoringBrain?.banditBrain;
+    if (!bandit) return;
+
+    for (const bot of fleet.bots) {
+      const prev = this._botSnapshots.get(bot.botId);
+
+      if (prev && prev.routine && prev.routine !== bot.routine) {
+        // Routine changed — the previous routine completed a cycle
+        const durationSec = Math.max(this.tick - prev.startTick, 30);
+        const creditDelta = (bot.credits ?? 0) - (prev.credits ?? 0);
+
+        // Build simple reward signals from credit delta
+        // Full signal extraction would require event tracking — credit delta is the main signal
+        const signals = emptySignals();
+        signals.creditDelta = creditDelta;
+
+        // Compute composite reward
+        const { reward, breakdown } = computeReward(signals, durationSec, this.goals);
+
+        // Build context from previous state (what the bot looked like at decision time)
+        const context = extractContext(bot, economy, this.goals, fleet.bots.length, this.deps.homeSystem);
+
+        const role = prev.role ?? "generalist";
+        bandit.recordOutcome(role, prev.routine as any, context, reward, {
+          botId: bot.botId,
+          durationSec,
+          goalType: this.goals[0]?.type,
+          rewardBreakdown: breakdown,
+        });
+      }
+
+      // Update snapshot for next cycle
+      this._botSnapshots.set(bot.botId, {
+        credits: bot.credits ?? 0,
+        routine: bot.routine,
+        role: bot.role,
+        startTick: this.tick,
+      });
     }
   }
 
