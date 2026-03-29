@@ -109,8 +109,12 @@ export class ApiClient {
     this.onNotifications = opts.onNotifications;
     this.onSessionExpired = opts.onSessionExpired;
 
-    // Restore session from store
-    const bot = this.sessionStore.getBot(opts.username);
+    // Session restored lazily in restoreSession() — called before first API use
+  }
+
+  /** Restore session from DB (call after construction, before first API call) */
+  async restoreSession(): Promise<void> {
+    const bot = await this.sessionStore.getBot(this.username);
     if (bot?.sessionId) {
       this.sessionId = bot.sessionId;
     }
@@ -143,7 +147,7 @@ export class ApiClient {
       await this.createSession();
     }
 
-    const pw = password ?? this.sessionStore.getBot(this.username)?.password;
+    const pw = password ?? (await this.sessionStore.getBot(this.username))?.password;
     if (!pw) throw new Error(`No password found for bot: ${this.username}`);
 
     const data = await this.call<{
@@ -153,12 +157,12 @@ export class ApiClient {
       poi: Record<string, unknown>;
     }>("login", { username: this.username, password: pw }, false);
 
-    // Store session
+    // Store session (fire-and-forget)
     this.sessionStore.updateSession(
       this.username,
       this.sessionId!,
       new Date(Date.now() + 30 * 60 * 1000).toISOString()
-    );
+    ).catch(() => {});
 
     if (!data.player) {
       throw new ApiError("login_failed", `Login returned null player for ${this.username} — account may be deleted`);
@@ -187,20 +191,20 @@ export class ApiClient {
       false
     );
 
-    // Store credentials
+    // Store credentials (fire-and-forget)
     this.sessionStore.upsertBot({
       username: this.username,
       password: data.password,
       empire,
       playerId: data.player_id,
-    });
+    }).catch(() => {});
 
     return { password: data.password, playerId: data.player_id };
   }
 
   async logout(): Promise<void> {
     await this.call("logout", {}, false);
-    this.sessionStore.clearSession(this.username);
+    this.sessionStore.clearSession(this.username).catch(() => {});
     this.sessionId = null;
   }
 
@@ -1315,13 +1319,13 @@ export class ApiClient {
           );
         }
 
-        // Update session expiry
+        // Update session expiry (fire-and-forget)
         if (data.session?.expiresAt) {
           this.sessionStore.updateSession(
             this.username,
             data.session.id,
             data.session.expiresAt
-          );
+          ).catch(() => {});
         }
 
         if (data.error) {

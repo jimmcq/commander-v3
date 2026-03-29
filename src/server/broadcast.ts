@@ -38,6 +38,7 @@ export interface BroadcastDeps {
   economy: EconomyEngine;
   galaxy: Galaxy;
   db: DB;
+  tenantId: string;
   startTime: number;
   trainingLogger?: TrainingLogger;
   broadcastConfig?: Partial<BroadcastConfig>;
@@ -226,6 +227,7 @@ export function startBroadcastLoop(deps: BroadcastDeps): () => void {
     if (tick % cfg.creditHistoryIntervalTicks === 0) {
       await deps.db.insert(creditHistory)
         .values({
+          tenantId: deps.tenantId,
           timestamp: Date.now(),
           totalCredits: fleet.totalCredits,
           activeBots: fleet.activeBots,
@@ -328,9 +330,10 @@ export function startBroadcastLoop(deps: BroadcastDeps): () => void {
       // Memory update
       const memStore = deps.commander.getMemoryStore();
       if (memStore) {
+        const allMemories = await memStore.getAll();
         broadcast({
           type: "memory_update",
-          memories: memStore.getAll().map((m) => ({
+          memories: allMemories.map((m) => ({
             key: m.key,
             fact: m.fact,
             importance: m.importance,
@@ -962,7 +965,8 @@ async function postFactionChatUpdate(deps: BroadcastDeps): Promise<void> {
   // 4. Pirate/combat warnings from chat intel
   const memStore = deps.commander.getMemoryStore();
   if (memStore) {
-    const warnings = memStore.getAll().filter(m => m.key.startsWith("chat_warning_"));
+    const allMem = await memStore.getAll();
+    const warnings = allMem.filter(m => m.key.startsWith("chat_warning_"));
     if (warnings.length > 0) {
       const latest = warnings[warnings.length - 1];
       // Only relay if recent (last 15 min)

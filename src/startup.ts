@@ -130,7 +130,10 @@ export async function startup(config: AppConfig): Promise<AppServices> {
 
   // ── API Factory ──
   const apiFactory: ApiClientFactory = (username: string) => {
-    return new ApiClient({ username, sessionStore, logger: trainingLogger });
+    const client = new ApiClient({ username, sessionStore, logger: trainingLogger });
+    // Restore session asynchronously (fire-and-forget, login will re-auth if needed)
+    client.restoreSession().catch(() => {});
+    return client;
   };
 
   // ── Bot Manager ──
@@ -517,6 +520,7 @@ export async function startup(config: AppConfig): Promise<AppServices> {
     economy,
     galaxy,
     db,
+    tenantId,
     startTime: Date.now(),
     trainingLogger,
     broadcastConfig: config.broadcast ? {
