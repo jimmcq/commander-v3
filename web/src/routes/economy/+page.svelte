@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { economy, bots, factionState } from "$stores/websocket";
+	import { economy, bots, factionState, getAuthHeaders } from "$stores/websocket";
 	import Chart from "$lib/components/Chart.svelte";
 	import SupplyChainFlow from "$lib/components/SupplyChainFlow.svelte";
 	import PriceHistory from "$lib/components/PriceHistory.svelte";
@@ -57,7 +57,7 @@
 
 	async function fetchMarketData() {
 		try {
-			const res = await fetch("/api/economy/market?range=1d");
+			const res = await fetch("/api/economy/market?range=1d", { headers: getAuthHeaders() });
 			if (res.ok) marketStationsData = await res.json();
 		} catch { /* silent */ }
 	}

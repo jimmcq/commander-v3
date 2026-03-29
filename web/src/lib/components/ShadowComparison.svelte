@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from "svelte";
+	import { getAuthHeaders } from "$stores/websocket";
 	import Chart from "./Chart.svelte";
 	import type { EChartsOption } from "echarts";
 
@@ -20,7 +21,7 @@
 
 	async function fetchShadowStats() {
 		try {
-			const res = await fetch("/api/training/shadow-stats");
+			const res = await fetch("/api/training/shadow-stats", { headers: getAuthHeaders() });
 			if (!res.ok) return;
 			stats = await res.json();
 		} catch {

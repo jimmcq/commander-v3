@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from "svelte";
-	import { commanderLog, trainingStats } from "$stores/websocket";
+	import { commanderLog, trainingStats, getAuthHeaders } from "$stores/websocket";
 	import type { TrainingStats } from "../../../../src/types/protocol";
 	import DecisionDistribution from "$lib/components/DecisionDistribution.svelte";
 	import EpisodeOutcomes from "$lib/components/EpisodeOutcomes.svelte";
@@ -12,7 +12,7 @@
 
 	async function fetchStats() {
 		try {
-			const res = await fetch("/api/training/stats");
+			const res = await fetch("/api/training/stats", { headers: getAuthHeaders() });
 			if (!res.ok) throw new Error(`HTTP ${res.status}`);
 			const data: TrainingStats = await res.json();
 			trainingStats.set(data);
@@ -65,7 +65,7 @@
 		runningRetention = true;
 		retentionResult = null;
 		try {
-			const res = await fetch("/api/training/clear", {
+			const res = await fetch("/api/training/clear", { headers: getAuthHeaders(),
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({ confirm: true, olderThanTick: 0, tables: [] }),
