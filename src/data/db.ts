@@ -42,6 +42,20 @@ export function createPostgresDatabase(url: string): DatabaseConnection {
     transform: {
       undefined: null,        // convert undefined values to null (matches SQLite behavior)
     },
+    types: {
+      // Override timestamp parsing to return ISO strings instead of Date objects
+      // This matches the SQLite behavior where timestamps are stored as text
+      date: {
+        to: 1114,             // timestamp OID
+        from: [1082, 1114, 1184], // date, timestamp, timestamptz
+        serialize: (x: unknown) => {
+          if (x instanceof Date) return x.toISOString();
+          if (typeof x === "string") return x;
+          return x == null ? null : String(x);
+        },
+        parse: (x: string) => x, // return as string, not Date
+      },
+    },
   });
 
   const db = drizzlePg(client, { schema: pgSchema });
