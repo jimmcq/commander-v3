@@ -120,10 +120,12 @@ export async function ensurePostgresTables(client: postgres.Sql, tenantId?: stri
 function ensureSqliteTables(sqlite: Database): void {
   const tx = sqlite.transaction(() => {
     sqlite.run(`CREATE TABLE IF NOT EXISTS cache (
-      key TEXT PRIMARY KEY, data TEXT NOT NULL, game_version TEXT, fetched_at INTEGER NOT NULL
+      key TEXT NOT NULL, tenant_id TEXT NOT NULL DEFAULT 'default', data TEXT NOT NULL, game_version TEXT, fetched_at INTEGER NOT NULL,
+      PRIMARY KEY (tenant_id, key)
     )`);
     sqlite.run(`CREATE TABLE IF NOT EXISTS timed_cache (
-      key TEXT PRIMARY KEY, data TEXT NOT NULL, fetched_at INTEGER NOT NULL, ttl_ms INTEGER NOT NULL
+      key TEXT NOT NULL, tenant_id TEXT NOT NULL DEFAULT 'default', data TEXT NOT NULL, fetched_at INTEGER NOT NULL, ttl_ms INTEGER NOT NULL,
+      PRIMARY KEY (tenant_id, key)
     )`);
     sqlite.run(`CREATE TABLE IF NOT EXISTS decision_log (
       id INTEGER PRIMARY KEY AUTOINCREMENT, tick INTEGER NOT NULL, bot_id TEXT NOT NULL,
@@ -155,6 +157,7 @@ function ensureSqliteTables(sqlite: Database): void {
     sqlite.run(`CREATE TABLE IF NOT EXISTS market_history (
       id INTEGER PRIMARY KEY AUTOINCREMENT, tick INTEGER NOT NULL, station_id TEXT NOT NULL,
       item_id TEXT NOT NULL, buy_price REAL, sell_price REAL, buy_volume INTEGER, sell_volume INTEGER,
+      tenant_id TEXT NOT NULL DEFAULT 'default',
       created_at TEXT DEFAULT (datetime('now'))
     )`);
     sqlite.run("CREATE INDEX IF NOT EXISTS idx_market_station_item ON market_history(station_id, item_id)");
@@ -201,7 +204,8 @@ function ensureSqliteTables(sqlite: Database): void {
     sqlite.run("CREATE INDEX IF NOT EXISTS idx_trade_ts ON trade_log(timestamp)");
     sqlite.run("CREATE INDEX IF NOT EXISTS idx_trade_bot ON trade_log(bot_id)");
     sqlite.run(`CREATE TABLE IF NOT EXISTS fleet_settings (
-      key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT DEFAULT (datetime('now'))
+      key TEXT NOT NULL, tenant_id TEXT NOT NULL DEFAULT 'default', value TEXT NOT NULL, updated_at TEXT DEFAULT (datetime('now')),
+      PRIMARY KEY (tenant_id, key)
     )`);
     sqlite.run(`CREATE TABLE IF NOT EXISTS llm_decisions (
       id INTEGER PRIMARY KEY AUTOINCREMENT, tick INTEGER NOT NULL, brain_name TEXT NOT NULL,
@@ -213,8 +217,9 @@ function ensureSqliteTables(sqlite: Database): void {
     sqlite.run("CREATE INDEX IF NOT EXISTS idx_llm_tick ON llm_decisions(tick)");
     sqlite.run("CREATE INDEX IF NOT EXISTS idx_llm_brain ON llm_decisions(brain_name)");
     sqlite.run(`CREATE TABLE IF NOT EXISTS poi_cache (
-      poi_id TEXT PRIMARY KEY, system_id TEXT NOT NULL, data TEXT NOT NULL,
-      updated_at TEXT DEFAULT (datetime('now'))
+      poi_id TEXT NOT NULL, system_id TEXT NOT NULL, data TEXT NOT NULL, tenant_id TEXT NOT NULL DEFAULT 'default',
+      updated_at TEXT DEFAULT (datetime('now')),
+      PRIMARY KEY (tenant_id, poi_id)
     )`);
     sqlite.run("CREATE INDEX IF NOT EXISTS idx_poi_system ON poi_cache(system_id)");
     sqlite.run(`CREATE TABLE IF NOT EXISTS faction_transactions (

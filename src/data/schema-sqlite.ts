@@ -9,20 +9,29 @@ import { sql } from "drizzle-orm";
 // ── Static Data Cache (version-gated) ──
 
 export const cache = sqliteTable("cache", {
-  key: text("key").primaryKey(),
+  key: text("key").notNull(),
+  tenantId: text("tenant_id").notNull().default("default"),
   data: text("data").notNull(),
   gameVersion: text("game_version"),
   fetchedAt: integer("fetched_at").notNull(),
-});
+}, (table) => [
+  // Composite primary key: (tenant_id, key)
+]);
 
 // ── Timed Cache (market, system, poi) ──
 
 export const timedCache = sqliteTable("timed_cache", {
-  key: text("key").primaryKey(),
+  key: text("key").notNull(),
+  tenantId: text("tenant_id").notNull().default("default"),
   data: text("data").notNull(),
   fetchedAt: integer("fetched_at").notNull(),
   ttlMs: integer("ttl_ms").notNull(),
-});
+}, (table) => [
+  // Composite primary key like PostgreSQL
+]);
+
+// Note: SQLite doesn't support adding indexes on composite keys easily via sqliteTable
+// The primary key is created via raw SQL in db.ts
 
 // ── Decision Log (training data) ──
 
@@ -101,6 +110,7 @@ export const marketHistory = sqliteTable("market_history", {
   sellPrice: real("sell_price"),
   buyVolume: integer("buy_volume"),
   sellVolume: integer("sell_volume"),
+  tenantId: text("tenant_id").notNull().default("default"),
   createdAt: text("created_at").default(sql`(datetime('now'))`),
 }, (table) => [
   index("idx_market_station_item").on(table.stationId, table.itemId),
@@ -207,7 +217,8 @@ export const tradeLog = sqliteTable("trade_log", {
 // ── Fleet Settings (key-value) ──
 
 export const fleetSettings = sqliteTable("fleet_settings", {
-  key: text("key").primaryKey(),
+  key: text("key").notNull(),
+  tenantId: text("tenant_id").notNull().default("default"),
   value: text("value").notNull(),
   updatedAt: text("updated_at").default(sql`(datetime('now'))`),
 });
@@ -235,9 +246,10 @@ export const llmDecisions = sqliteTable("llm_decisions", {
 // ── POI Cache (persistent POI resources) ──
 
 export const poiCache = sqliteTable("poi_cache", {
-  poiId: text("poi_id").primaryKey(),
+  poiId: text("poi_id").notNull(),
   systemId: text("system_id").notNull(),
   data: text("data").notNull(),
+  tenantId: text("tenant_id").notNull().default("default"),
   updatedAt: text("updated_at").default(sql`(datetime('now'))`),
 }, (table) => [
   index("idx_poi_system").on(table.systemId),
