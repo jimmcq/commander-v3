@@ -123,13 +123,13 @@ const DEFAULT_CONFIG: ScoringConfig = {
     miner: 50,        // Reduced — ore stockpile is massive, crafters are bottleneck
     harvester: 35,    // Multi-target extraction (ice/gas), lower than miner
     trader: 65,       // Sells refined goods — direct revenue generator
-    explorer: 40,     // Charts systems, data gathering — useful but no direct revenue
+    explorer: 35,     // Charts systems — info scarcity bonus drives priority dynamically
     crafter: 60,      // Reduced base — supply bonus + recipe viability drive assignment
     hunter: 15,       // Low priority but not dead — occasional loot value
     salvager: 15,     // Low priority — wrecks can be profitable
-    mission_runner: 50, // Reliable income: smart mission selection, skips combat, refreshes market data
+    mission_runner: 45, // Reliable income — deprioritized slightly so miners/crafters/traders lead
     return_home: 5,     // Utility routine — only for idle bots away from home
-    scout: 10,          // One-shot data gathering — scored high only when data is needed
+    scout: 25,          // Market data is critical for traders and crafters
     quartermaster: 40,  // Faction home manager — sells crafted goods, reliable revenue
     scavenger: 10,      // SUPPRESSED: burns fuel, unreliable
     ship_upgrade: 0,    // Only scores > 0 when Commander queues an upgrade
@@ -838,41 +838,56 @@ export class ScoringBrain implements CommanderBrain {
         return crafterBonus;
       }
       case "miner": {
-        // Deficit-aware: check per-ore-type scarcity vs surplus
-        let scarceCount = 0;   // ore types with < 200 stock
-        let surplusCount = 0;  // ore types with > 5000 stock
+        // Deficit-aware: reward mining scarce ores, penalize when oversupplied
+        let scarceCount = 0;
+        let surplusCount = 0;
         for (const [, qty] of oreBreakdown) {
-          if (qty < 200) scarceCount++;
-          if (qty > 5000) surplusCount++;
+          if (qty < 100) scarceCount++;
+          if (qty > 3000) surplusCount++;
         }
-        // If any ore type is scarce, mining is still valuable
-        if (scarceCount > 0) return 15;
-        // No scarce ores — apply heavy penalty based on total stockpile
-        if (oreInStorage < 30) return 0;
-        if (oreInStorage < 100) return -20;
-        if (oreInStorage < 1000) return -60;
-        return -120;
+
+        let minerBonus = 0;
+
+        // Low ore = high incentive to mine
+        if (oreInStorage < 50) minerBonus += 60;        // Critical — crafters idle
+        else if (oreInStorage < 200) minerBonus += 40;  // Low supply
+        else if (oreInStorage < 500) minerBonus += 20;  // Moderate
+        else if (oreInStorage < 2000) minerBonus += 0;  // Comfortable
+        else if (oreInStorage < 5000) minerBonus -= 20; // Getting heavy
+        else minerBonus -= 50;                           // Massive stockpile, slow down
+
+        // Scarce ore types override — even with total abundance, mine what's missing
+        if (scarceCount > 0) minerBonus += scarceCount * 15;
+
+        // All ores oversupplied — heavy penalty
+        if (surplusCount > 0 && scarceCount === 0) minerBonus -= surplusCount * 10;
+
+        return minerBonus;
       }
-      case "trader":
-        // Trader gets bonus when refined/crafted goods are in storage (ready to sell)
-        // These are the high-margin items — ore refined into valuable products
-        {
-          const goodsInStorage = [...economy.factionStorage.entries()]
-            .filter(([id]) => !id.includes("ore") && !id.includes("ice") && !id.includes("gas"))
-            .reduce((sum, [, qty]) => sum + qty, 0);
-          if (goodsInStorage >= 50) return 50;  // Lots of refined goods — sell urgently
-          if (goodsInStorage >= 20) return 35;
-          if (goodsInStorage >= 5) return 15;
+      case "trader": {
+        let traderBonus = 0;
+
+        // Refined/crafted goods ready to sell (high-margin)
+        const goodsInStorage = [...economy.factionStorage.entries()]
+          .filter(([id]) => !id.includes("ore") && !id.includes("ice") && !id.includes("gas"))
+          .reduce((sum, [, qty]) => sum + qty, 0);
+        if (goodsInStorage >= 100) traderBonus += 50;
+        else if (goodsInStorage >= 50) traderBonus += 40;
+        else if (goodsInStorage >= 20) traderBonus += 25;
+        else if (goodsInStorage >= 5) traderBonus += 10;
+
+        // Excess ore to sell (10k+ per type)
+        let oreOverstock = 0;
+        for (const [, qty] of oreBreakdown) {
+          if (qty >= 5000) oreOverstock += qty - 2000;
         }
-        // Only sell raw ore as last resort when massively overstocked (10k+)
-        {
-          let oreOverstock = 0;
-          for (const [, qty] of oreBreakdown) {
-            if (qty >= 10000) oreOverstock += qty - 5000;
-          }
-          if (oreOverstock > 0) return 40; // Sell excess ore
-        }
-        return 0;
+        if (oreOverstock > 0) traderBonus += Math.min(30, Math.round(oreOverstock / 500));
+
+        // Revenue awareness: if fleet has been earning, keep trading
+        if (economy.totalRevenue > 0) traderBonus += 5;
+
+        return traderBonus;
+      }
       case "quartermaster":
         // QM sells refined goods from faction storage — high-margin activity
         {
