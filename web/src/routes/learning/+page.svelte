@@ -366,7 +366,7 @@
 		</div>
 	{/if}
 
-	<!-- Per-Role Reward Trends -->
+	<!-- Per-Role Reward Trends (Line Chart) -->
 	{#if data && data.roleRewardTrend && data.roleRewardTrend.length > 0}
 		{@const roleGroups = (() => {
 			const groups = new Map<string, Array<{ hour: string; avgReward: number; episodes: number }>>();
@@ -376,6 +376,11 @@
 			}
 			return groups;
 		})()}
+		{@const allHours = (() => {
+			const set = new Set<string>();
+			for (const p of data.roleRewardTrend) set.add(p.hour);
+			return [...set].sort();
+		})()}
 		{@const maxRoleAbs = (() => {
 			let max = 1;
 			for (const points of roleGroups.values()) {
@@ -383,53 +388,82 @@
 			}
 			return max;
 		})()}
+		{@const W = 600}
+		{@const H = 200}
+		{@const PAD = 30}
 		<div class="card p-4">
 			<h2 class="text-sm font-semibold text-chrome-silver uppercase tracking-wider mb-3">
 				Reward Trend by Role (Hourly)
 			</h2>
-			<div class="space-y-3">
+			<div class="overflow-x-auto">
+				<svg viewBox="0 0 {W} {H + 30}" class="w-full min-w-[500px]" style="max-height: 280px;">
+					<!-- Grid -->
+					<line x1={PAD} y1={H / 2} x2={W - 10} y2={H / 2} stroke="#1e1e2e" stroke-width="1" />
+					<line x1={PAD} y1={PAD} x2={PAD} y2={H - PAD} stroke="#1e1e2e" stroke-width="1" />
+					<!-- Zero label -->
+					<text x={PAD - 5} y={H / 2 + 4} fill="#6e6e7a" font-size="9" text-anchor="end">0</text>
+					<text x={PAD - 5} y={PAD + 4} fill="#6e6e7a" font-size="9" text-anchor="end">+{Math.round(maxRoleAbs)}</text>
+					<text x={PAD - 5} y={H - PAD + 4} fill="#6e6e7a" font-size="9" text-anchor="end">-{Math.round(maxRoleAbs)}</text>
+
+					<!-- Hour labels -->
+					{#each allHours as hour, i}
+						{@const x = PAD + (i / Math.max(allHours.length - 1, 1)) * (W - PAD - 10)}
+						{#if i % Math.max(1, Math.floor(allHours.length / 6)) === 0}
+							<text x={x} y={H + 12} fill="#6e6e7a" font-size="8" text-anchor="middle">
+								{formatHour(hour)}
+							</text>
+							<line x1={x} y1={PAD} x2={x} y2={H - PAD} stroke="#1e1e2e" stroke-width="0.5" />
+						{/if}
+					{/each}
+
+					<!-- Role lines -->
+					{#each [...roleGroups.entries()] as [role, points]}
+						{@const color = ROLE_COLORS[role] ?? "#6b7280"}
+						{@const pathData = points.map((p) => {
+							const xi = allHours.indexOf(p.hour);
+							const x = PAD + (xi / Math.max(allHours.length - 1, 1)) * (W - PAD - 10);
+							const y = (H / 2) - (p.avgReward / maxRoleAbs) * ((H / 2) - PAD);
+							return `${x},${y}`;
+						}).join(" L ")}
+						<polyline
+							points={pathData.replace(" L ", " ")}
+							fill="none"
+							stroke={color}
+							stroke-width="2"
+							stroke-linecap="round"
+							stroke-linejoin="round"
+							d="M {pathData}"
+						/>
+						<!-- Dots on data points -->
+						{#each points as p}
+							{@const xi = allHours.indexOf(p.hour)}
+							{@const x = PAD + (xi / Math.max(allHours.length - 1, 1)) * (W - PAD - 10)}
+							{@const y = (H / 2) - (p.avgReward / maxRoleAbs) * ((H / 2) - PAD)}
+							<circle cx={x} cy={y} r="3" fill={color} opacity="0.8">
+								<title>{role}: {p.avgReward.toFixed(1)} avg ({p.episodes} ep) — {formatHour(p.hour)}</title>
+							</circle>
+						{/each}
+					{/each}
+				</svg>
+			</div>
+			<!-- Legend -->
+			<div class="flex flex-wrap items-center gap-3 mt-3 text-xs">
 				{#each [...roleGroups.entries()].sort((a, b) => a[0].localeCompare(b[0])) as [role, points]}
 					{@const color = ROLE_COLORS[role] ?? "#6b7280"}
 					{@const latest = points[points.length - 1]?.avgReward ?? 0}
 					{@const first = points[0]?.avgReward ?? 0}
 					{@const improving = latest > first}
-					<div>
-						<div class="flex items-center justify-between mb-1">
-							<div class="flex items-center gap-2">
-								<span class="w-3 h-3 rounded" style="background: {color};"></span>
-								<span class="text-xs font-semibold text-chrome-silver">{role.replace(/_/g, " ")}</span>
-							</div>
-							<div class="flex items-center gap-2 text-xs">
-								<span class="{latest >= 0 ? 'text-bio-green' : 'text-claw-red'} mono">
-									{latest >= 0 ? "+" : ""}{latest.toFixed(1)}
-								</span>
-								<span class="{improving ? 'text-bio-green' : 'text-claw-red'}">
-									{improving ? "↑" : "↓"}
-								</span>
-								<span class="text-hull-grey">{points.reduce((s, p) => s + p.episodes, 0)} ep</span>
-							</div>
-						</div>
-						<div class="flex items-center gap-px h-6 overflow-hidden rounded bg-hull-darker">
-							{#each points as p}
-								{@const pct = Math.min(Math.abs(p.avgReward) / maxRoleAbs, 1) * 100}
-								<div
-									class="flex-1 relative"
-									title="{formatHour(p.hour)}: {p.avgReward.toFixed(1)} avg ({p.episodes} ep)"
-								>
-									<div
-										class="absolute bottom-0 left-0 right-0 rounded-sm"
-										style="height: {Math.max(pct, 4)}%; background: {p.avgReward >= 0 ? color : '#ef4444'}; opacity: {Math.max(0.3, pct / 100)};"
-									></div>
-								</div>
-							{/each}
-						</div>
-					</div>
+					<span class="flex items-center gap-1.5">
+						<span class="w-3 h-0.5 rounded" style="background: {color};"></span>
+						<span class="text-chrome-silver">{role.replace(/_/g, " ")}</span>
+						<span class="{latest >= 0 ? 'text-bio-green' : 'text-claw-red'} mono text-[10px]">
+							{latest >= 0 ? "+" : ""}{latest.toFixed(1)}
+						</span>
+						<span class="{improving ? 'text-bio-green' : 'text-claw-red'} text-[10px]">
+							{improving ? "↑" : "↓"}
+						</span>
+					</span>
 				{/each}
-			</div>
-			<div class="flex items-center gap-3 mt-3 text-xs text-hull-grey">
-				<span>↑ Improving</span>
-				<span>↓ Declining</span>
-				<span>Bar height = reward magnitude, color = role (red = negative)</span>
 			</div>
 		</div>
 	{/if}
