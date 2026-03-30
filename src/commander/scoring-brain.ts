@@ -43,7 +43,7 @@ const ROUTINE_MAX_COUNT: Partial<Record<RoutineName, number>> = {
   scout: 1,
   explorer: 1, // Default; overridden by getMaxCount() for larger fleets
   quartermaster: 1, // Only one faction home manager
-  crafter: 5,      // Allow more crafters — high-end product focus with saturation guards
+  crafter: 3,      // Capped — demand-driven scoring prevents oversaturation
   scavenger: 1,    // One scavenger roaming at a time
   hunter: 1,       // Cap combat bots — burns fuel with unreliable returns
   salvager: 1,     // One salvager at a time
@@ -103,7 +103,7 @@ const DEFAULT_CONFIG: ScoringConfig = {
     harvester: 35,    // Multi-target extraction (ice/gas), lower than miner
     trader: 65,       // Sells refined goods — direct revenue generator
     explorer: 40,     // Charts systems, data gathering — useful but no direct revenue
-    crafter: 90,      // HIGHEST PRIORITY: converts ore → refined goods (10-50x value multiplier)
+    crafter: 60,      // Reduced base — supply bonus + recipe viability drive assignment
     hunter: 15,       // Low priority but not dead — occasional loot value
     salvager: 15,     // Low priority — wrecks can be profitable
     mission_runner: 50, // Reliable income: smart mission selection, skips combat, refreshes market data
@@ -787,15 +787,35 @@ export class ScoringBrain implements CommanderBrain {
     }
 
     switch (routine) {
-      case "crafter":
-        // Crafter should be strongly preferred when ore is available to process
-        // Ore is worth 10-50x more refined — crafting is the highest-margin activity
-        if (oreInStorage >= 1000) return 80; // Massive stockpile — max urgency to refine
-        if (oreInStorage >= 100) return 60;  // Large supply — need more crafters
-        if (oreInStorage >= 50) return 50;   // Good supply — keep crafting
-        if (oreInStorage >= 20) return 40;   // Decent supply
-        if (oreInStorage >= 3) return 20;    // Minimum viable batch
-        return 0;
+      case "crafter": {
+        // Crafter bonus based on ore availability AND sell-side demand
+        let crafterBonus = 0;
+
+        // Material availability
+        if (oreInStorage >= 500) crafterBonus += 40;      // Good stockpile to process
+        else if (oreInStorage >= 100) crafterBonus += 30;
+        else if (oreInStorage >= 20) crafterBonus += 15;
+        else if (oreInStorage >= 3) crafterBonus += 5;
+        else return -20; // No materials = don't craft
+
+        // Sell-side awareness: check if crafted goods are actually moving
+        const craftedGoods = [...economy.factionStorage.entries()]
+          .filter(([id]) => id.startsWith("refined_") || id.startsWith("component_") || id.includes("alloy") || id.includes("circuit") || id.includes("plate"));
+        const totalCraftedStock = craftedGoods.reduce((sum, [, qty]) => sum + qty, 0);
+
+        if (totalCraftedStock > 500) {
+          // Heavy inventory of unsold crafted goods — reduce crafter urgency
+          crafterBonus -= Math.min(40, Math.round(totalCraftedStock / 20));
+        }
+
+        // Intermediate demand: if any intermediate has 0 stock and recipes need it, urgent
+        const intermediatesDepleted = craftedGoods.filter(([, qty]) => qty === 0).length;
+        if (intermediatesDepleted > 0) {
+          crafterBonus += intermediatesDepleted * 10; // Each depleted intermediate adds urgency
+        }
+
+        return crafterBonus;
+      }
       case "miner": {
         // Deficit-aware: check per-ore-type scarcity vs surplus
         let scarceCount = 0;   // ore types with < 200 stock
