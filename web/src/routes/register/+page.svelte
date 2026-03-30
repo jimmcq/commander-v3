@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { goto } from "$app/navigation";
 	import { auth, isAuthenticated } from "$stores/auth";
+	import { connect } from "$stores/websocket";
 	import { onMount } from "svelte";
 
 	let username = $state("");
@@ -45,6 +46,7 @@
 		loading = false;
 
 		if (result.success) {
+			connect();
 			goto("/");
 		} else {
 			error = result.error ?? "Registration failed.";

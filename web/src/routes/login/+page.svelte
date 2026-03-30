@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { goto } from "$app/navigation";
 	import { auth, isAuthenticated } from "$stores/auth";
+	import { connect } from "$stores/websocket";
 	import { onMount } from "svelte";
 
 	let username = $state("");
@@ -27,6 +28,7 @@
 		loading = false;
 
 		if (result.success) {
+			connect(); // Start WebSocket after login (layout onMount won't re-fire)
 			goto("/");
 		} else {
 			error = result.error ?? "Login failed.";
