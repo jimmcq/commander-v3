@@ -295,6 +295,8 @@ export async function* miner(ctx: BotContext): AsyncGenerator<RoutineYield, void
 
     {
       let mineCount = 0;
+      let lastMinedOre = targetOre || "";
+      let totalMined = 0;
       while (!ctx.shouldStop) {
         // Refresh before check every 5 mines to avoid stale cargo_full errors
         if (mineCount > 0 && mineCount % 5 === 0) {
@@ -302,10 +304,14 @@ export async function* miner(ctx: BotContext): AsyncGenerator<RoutineYield, void
         }
         if (!ctx.cargo.hasSpace(ctx.ship, 1)) break;
 
-        yield `mining${targetOre ? ` ${targetOre}` : ""}`;
+        const oreLabel = lastMinedOre ? lastMinedOre.replace(/_/g, " ") : "";
+        const cargoFill = Math.round(ctx.cargo.usedPct(ctx.ship));
+        yield `mining ${oreLabel}${totalMined > 0 ? ` (${totalMined} mined, ${cargoFill}% full)` : ""}`;
         try {
           const result = await ctx.api.mine();
           mineCount++;
+          lastMinedOre = result.resourceId || lastMinedOre;
+          totalMined += result.quantity;
           // Refresh on depletion
           if (result.quantity === 0 || result.remaining === 0) {
             await ctx.refreshState();
