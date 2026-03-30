@@ -227,12 +227,17 @@ export class TrainingLogger {
     botId: string; action: "buy" | "sell" | "craft"; itemId: string;
     quantity: number; priceEach: number; total: number; stationId?: string;
   }): Promise<void> {
-    await this.db.insert(tradeLog).values({
-      tenantId: this.tenantId,
-      timestamp: Date.now(), botId: params.botId, action: params.action,
-      itemId: params.itemId, quantity: params.quantity, priceEach: params.priceEach,
-      total: params.total, stationId: params.stationId ?? null,
-    });
+    try {
+      await this.db.insert(tradeLog).values({
+        tenantId: this.tenantId,
+        timestamp: Date.now(), botId: params.botId, action: params.action,
+        itemId: params.itemId || "unknown", quantity: params.quantity || 0,
+        priceEach: params.priceEach || 0, total: params.total || 0,
+        stationId: params.stationId ?? null,
+      });
+    } catch (err) {
+      console.warn(`[TrainingLogger] logTrade failed: ${err instanceof Error ? err.message : err}`);
+    }
   }
 
   /** Get 24h revenue/cost/profit totals from persisted financial events */

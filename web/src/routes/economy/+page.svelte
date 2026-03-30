@@ -824,196 +824,61 @@
 		<!-- Supply Chain Flow -->
 		<SupplyChainFlow />
 
-		<!-- Buy Orders / Sell Orders side by side -->
-		<div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-			<!-- Buy Orders -->
-			<div class="card p-4">
-				<h2 class="text-sm font-semibold text-chrome-silver uppercase tracking-wider mb-3">
-					Buy Orders
-					{#if buyOrders.length > 0}
-						<span class="text-hull-grey font-normal ml-1">({buyOrders.length})</span>
-					{/if}
-				</h2>
-				{#if buyOrders.length === 0}
-					<p class="text-sm text-hull-grey py-6 text-center">No active buy orders</p>
-				{:else}
-					<div class="overflow-y-auto max-h-64">
-						<table class="w-full text-xs">
-							<thead class="sticky top-0 bg-deep-void">
-								<tr class="text-left text-[10px] text-chrome-silver uppercase tracking-wider border-b border-hull-grey/30">
-									<th class="pb-1.5 pr-2">Item</th>
-									<th class="pb-1.5 pr-2 text-right">Qty</th>
-									<th class="pb-1.5 pr-2 text-right">Price</th>
-									<th class="pb-1.5 pr-2 text-right">Fill</th>
-									<th class="pb-1.5 pr-2">Owner</th>
-									<th class="pb-1.5 text-right">Age</th>
-								</tr>
-							</thead>
-							<tbody class="divide-y divide-hull-grey/10">
-								{#each buyOrders as order}
-									<tr class="hover:bg-nebula-blue/10 transition-colors">
-										<td class="py-1.5 pr-2 text-star-white">{order.itemName}</td>
-										<td class="py-1.5 pr-2 text-right mono text-chrome-silver">{order.quantity}</td>
-										<td class="py-1.5 pr-2 text-right mono text-bio-green">{order.priceEach.toLocaleString()}</td>
-										<td class="py-1.5 pr-2 text-right">
-											<div class="flex items-center justify-end gap-1">
-												<div class="w-10 h-1.5 bg-hull-grey/20 rounded-full overflow-hidden">
-													<div class="h-full bg-bio-green/60 rounded-full" style="width:{Math.round(order.filled / order.quantity * 100)}%"></div>
-												</div>
-												<span class="mono text-hull-grey text-[10px]">{order.filled}/{order.quantity}</span>
-											</div>
-										</td>
-										<td class="py-1.5 pr-2 truncate max-w-[70px]">
-											{#if order.owner === "faction"}
-												<span class="text-[10px] px-1 py-0.5 rounded bg-void-purple/20 text-void-purple">Fac</span>
-											{:else}
-												<span class="text-laser-blue text-[10px]">{order.botId}</span>
-											{/if}
-										</td>
-										<td class="py-1.5 text-right {orderAgeClass(order.createdAt)} text-[10px]">{orderAge(order.createdAt)}</td>
-									</tr>
-								{/each}
-							</tbody>
-						</table>
-					</div>
-				{/if}
-			</div>
-
-			<!-- Sell Orders -->
-			<div class="card p-4">
-				<h2 class="text-sm font-semibold text-chrome-silver uppercase tracking-wider mb-3">
-					Sell Orders
-					{#if sellOrders.length > 0}
-						<span class="text-hull-grey font-normal ml-1">({sellOrders.length})</span>
-					{/if}
-				</h2>
-				{#if sellOrders.length === 0}
-					<p class="text-sm text-hull-grey py-6 text-center">No active sell orders</p>
-				{:else}
-					<div class="overflow-y-auto max-h-64">
-						<table class="w-full text-xs">
-							<thead class="sticky top-0 bg-deep-void">
-								<tr class="text-left text-[10px] text-chrome-silver uppercase tracking-wider border-b border-hull-grey/30">
-									<th class="pb-1.5 pr-2">Item</th>
-									<th class="pb-1.5 pr-2 text-right">Qty</th>
-									<th class="pb-1.5 pr-2 text-right">Price</th>
-									<th class="pb-1.5 pr-2 text-right">Fill</th>
-									<th class="pb-1.5 pr-2">Owner</th>
-									<th class="pb-1.5 text-right">Age</th>
-								</tr>
-							</thead>
-							<tbody class="divide-y divide-hull-grey/10">
-								{#each sellOrders as order}
-									<tr class="hover:bg-nebula-blue/10 transition-colors">
-										<td class="py-1.5 pr-2 text-star-white">{order.itemName}</td>
-										<td class="py-1.5 pr-2 text-right mono text-chrome-silver">{order.quantity}</td>
-										<td class="py-1.5 pr-2 text-right mono text-shell-orange">{order.priceEach.toLocaleString()}</td>
-										<td class="py-1.5 pr-2 text-right">
-											<div class="flex items-center justify-end gap-1">
-												<div class="w-10 h-1.5 bg-hull-grey/20 rounded-full overflow-hidden">
-													<div class="h-full bg-shell-orange/60 rounded-full" style="width:{Math.round(order.filled / order.quantity * 100)}%"></div>
-												</div>
-												<span class="mono text-hull-grey text-[10px]">{order.filled}/{order.quantity}</span>
-											</div>
-										</td>
-										<td class="py-1.5 pr-2 truncate max-w-[70px]">
-											{#if order.owner === "faction"}
-												<span class="text-[10px] px-1 py-0.5 rounded bg-void-purple/20 text-void-purple">Fac</span>
-											{:else}
-												<span class="text-laser-blue text-[10px]">{order.botId}</span>
-											{/if}
-										</td>
-										<td class="py-1.5 text-right {orderAgeClass(order.createdAt)} text-[10px]">{orderAge(order.createdAt)}</td>
-									</tr>
-								{/each}
-							</tbody>
-						</table>
-					</div>
-				{/if}
-			</div>
-		</div>
-
-		<!-- Order Performance Summary -->
-		{@const allOrders = $economy?.openOrders ?? []}
-		{@const filledBuys = allOrders.filter(o => o.type === "buy" && o.filled > 0)}
-		{@const filledSells = allOrders.filter(o => o.type === "sell" && o.filled > 0)}
-		{@const completedBuyCost = filledBuys.reduce((s, o) => s + o.priceEach * o.filled, 0)}
-		{@const completedSellRev = filledSells.reduce((s, o) => s + o.priceEach * o.filled, 0)}
-		{@const activeBuyValue = buyOrders.reduce((s, o) => s + o.priceEach * (o.quantity - o.filled), 0)}
-		{@const activeSellValue = sellOrders.reduce((s, o) => s + o.priceEach * (o.quantity - o.filled), 0)}
-		{@const orderProfit = completedSellRev - completedBuyCost}
-		{@const totalFillRate = allOrders.length > 0 ? allOrders.reduce((s, o) => s + (o.quantity > 0 ? o.filled / o.quantity : 0), 0) / allOrders.length * 100 : 0}
+		<!-- Exchange Orders (unified) -->
 		<div class="card p-4">
 			<h2 class="text-sm font-semibold text-chrome-silver uppercase tracking-wider mb-3">
-				Order Performance
+				Exchange Orders
+				<span class="text-hull-grey font-normal ml-1">({buyOrders.length} buy, {sellOrders.length} sell)</span>
 			</h2>
-			<div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
-				<div class="bg-hull-grey/10 rounded p-2.5">
-					<div class="text-[10px] text-hull-grey uppercase">Active Buy Orders</div>
-					<div class="text-lg font-bold text-star-white">{buyOrders.length}</div>
-					<div class="text-[10px] text-hull-grey">{activeBuyValue.toLocaleString()} cr escrowed</div>
-				</div>
-				<div class="bg-hull-grey/10 rounded p-2.5">
-					<div class="text-[10px] text-hull-grey uppercase">Active Sell Orders</div>
-					<div class="text-lg font-bold text-star-white">{sellOrders.length}</div>
-					<div class="text-[10px] text-hull-grey">{activeSellValue.toLocaleString()} cr listed</div>
-				</div>
-				<div class="bg-hull-grey/10 rounded p-2.5">
-					<div class="text-[10px] text-hull-grey uppercase">Filled Revenue</div>
-					<div class="text-lg font-bold text-bio-green">{completedSellRev.toLocaleString()}</div>
-					<div class="text-[10px] text-hull-grey">{filledSells.length} sell orders filled</div>
-				</div>
-				<div class="bg-hull-grey/10 rounded p-2.5">
-					<div class="text-[10px] text-hull-grey uppercase">Order Profit</div>
-					<div class="text-lg font-bold {orderProfit >= 0 ? 'text-bio-green' : 'text-claw-red'}">
-						{orderProfit >= 0 ? "+" : ""}{orderProfit.toLocaleString()}
-					</div>
-					<div class="text-[10px] text-hull-grey">Fill rate: {totalFillRate.toFixed(0)}%</div>
-				</div>
-			</div>
-			<!-- Filled orders detail table -->
-			{#if filledSells.length > 0 || filledBuys.length > 0}
-				<div class="overflow-y-auto max-h-48">
+
+			{#if buyOrders.length === 0 && sellOrders.length === 0}
+				<p class="text-sm text-hull-grey py-6 text-center">No active orders</p>
+			{:else}
+				<div class="overflow-y-auto max-h-80">
 					<table class="w-full text-xs">
 						<thead class="sticky top-0 bg-deep-void">
 							<tr class="text-left text-[10px] text-chrome-silver uppercase tracking-wider border-b border-hull-grey/30">
+								<th class="pb-1.5 pr-2">Type</th>
 								<th class="pb-1.5 pr-2">Item</th>
-								<th class="pb-1.5 pr-2 text-right">Type</th>
-								<th class="pb-1.5 pr-2 text-right">Filled</th>
 								<th class="pb-1.5 pr-2 text-right">Price</th>
-								<th class="pb-1.5 pr-2 text-right">Revenue</th>
-								<th class="pb-1.5 text-right">Fill %</th>
+								<th class="pb-1.5 pr-2 text-right">Fill</th>
+								<th class="pb-1.5 pr-2 text-right">Value</th>
+								<th class="pb-1.5 pr-2">Owner</th>
+								<th class="pb-1.5 text-right">Age</th>
 							</tr>
 						</thead>
 						<tbody class="divide-y divide-hull-grey/10">
-							{#each [...filledSells, ...filledBuys].sort((a, b) => b.priceEach * b.filled - a.priceEach * a.filled) as order}
+							{#each [...buyOrders.map(o => ({...o, _type: 'buy' as const})), ...sellOrders.map(o => ({...o, _type: 'sell' as const}))].sort((a, b) => (b.priceEach * b.quantity) - (a.priceEach * a.quantity)) as order}
 								<tr class="hover:bg-nebula-blue/10 transition-colors">
-									<td class="py-1.5 pr-2 text-star-white">{order.itemName || order.itemId}</td>
-									<td class="py-1.5 pr-2 text-right">
-										<span class="px-1 rounded text-[10px] {order.type === 'sell' ? 'bg-bio-green/20 text-bio-green' : 'bg-nebula-blue/20 text-nebula-blue'}">
-											{order.type}
+									<td class="py-1.5 pr-2">
+										<span class="px-1.5 py-0.5 rounded text-[10px] font-semibold {order._type === 'buy' ? 'bg-bio-green/20 text-bio-green' : 'bg-shell-orange/20 text-shell-orange'}">
+											{order._type}
 										</span>
 									</td>
-									<td class="py-1.5 pr-2 text-right text-star-white">{order.filled}/{order.quantity}</td>
-									<td class="py-1.5 pr-2 text-right text-hull-grey">{order.priceEach.toLocaleString()}</td>
-									<td class="py-1.5 pr-2 text-right {order.type === 'sell' ? 'text-bio-green' : 'text-claw-red'}">
-										{(order.priceEach * order.filled).toLocaleString()}
-									</td>
-									<td class="py-1.5 text-right">
+									<td class="py-1.5 pr-2 text-star-white">{order.itemName}</td>
+									<td class="py-1.5 pr-2 text-right mono {order._type === 'buy' ? 'text-bio-green' : 'text-shell-orange'}">{order.priceEach.toLocaleString()}</td>
+									<td class="py-1.5 pr-2 text-right">
 										<div class="flex items-center justify-end gap-1">
-											<span class="text-hull-grey">{Math.round(order.filled / order.quantity * 100)}%</span>
 											<div class="w-10 h-1.5 bg-hull-grey/20 rounded-full overflow-hidden">
-												<div class="h-full bg-bio-green/60 rounded-full" style="width:{Math.round(order.filled / order.quantity * 100)}%"></div>
+												<div class="h-full {order._type === 'buy' ? 'bg-bio-green/60' : 'bg-shell-orange/60'} rounded-full" style="width:{Math.round(order.filled / order.quantity * 100)}%"></div>
 											</div>
+											<span class="mono text-hull-grey text-[10px]">{order.filled}/{order.quantity}</span>
 										</div>
 									</td>
+									<td class="py-1.5 pr-2 text-right mono text-chrome-silver">{(order.priceEach * order.quantity).toLocaleString()}</td>
+									<td class="py-1.5 pr-2 truncate max-w-[70px]">
+										{#if order.owner === "faction"}
+											<span class="text-[10px] px-1 py-0.5 rounded bg-void-purple/20 text-void-purple">Fac</span>
+										{:else}
+											<span class="text-laser-blue text-[10px]">{order.botId}</span>
+										{/if}
+									</td>
+									<td class="py-1.5 text-right {orderAgeClass(order.createdAt)} text-[10px]">{orderAge(order.createdAt)}</td>
 								</tr>
 							{/each}
 						</tbody>
 					</table>
 				</div>
-			{:else}
-				<p class="text-sm text-hull-grey text-center py-3">No filled orders yet</p>
 			{/if}
 		</div>
 
