@@ -62,7 +62,7 @@ export class MemoryStore {
 
     const row = rows[0];
     return row
-      ? { ...row, updatedAt: row.updatedAt?.toISOString() ?? new Date().toISOString() }
+      ? { ...row, updatedAt: String(row.updatedAt ?? new Date().toISOString()) }
       : null;
   }
 
@@ -76,7 +76,7 @@ export class MemoryStore {
 
     return rows.map((r) => ({
       ...r,
-      updatedAt: r.updatedAt?.toISOString() ?? new Date().toISOString(),
+      updatedAt: String(r.updatedAt ?? new Date().toISOString()),
     }));
   }
 
@@ -91,7 +91,7 @@ export class MemoryStore {
 
     return rows.map((r) => ({
       ...r,
-      updatedAt: r.updatedAt?.toISOString() ?? new Date().toISOString(),
+      updatedAt: String(r.updatedAt ?? new Date().toISOString()),
     }));
   }
 

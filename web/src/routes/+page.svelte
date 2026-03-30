@@ -1,6 +1,29 @@
 <script lang="ts">
-	import { bots, fleetStats, commanderLog, activityLog, connectionState, economy } from "$stores/websocket";
+	import { onMount } from "svelte";
+	import { bots, fleetStats, commanderLog, activityLog, connectionState, economy, getAuthHeaders } from "$stores/websocket";
 	import CreditsChart from "$lib/components/CreditsChart.svelte";
+
+	// Per-bot 24h revenue from financial events
+	let botRevenue24h = $state<Record<string, number>>({});
+
+	async function fetchBotRevenue() {
+		try {
+			const res = await fetch("/api/economy/bot-breakdown?range=1d", { headers: getAuthHeaders() });
+			if (!res.ok) return;
+			const data: Array<{ botId: string; revenue: number; cost: number }> = await res.json();
+			const map: Record<string, number> = {};
+			for (const d of data) {
+				if (d.botId) map[d.botId] = Math.round((d.revenue ?? 0) - (d.cost ?? 0));
+			}
+			botRevenue24h = map;
+		} catch { /* non-critical */ }
+	}
+
+	onMount(() => {
+		fetchBotRevenue();
+		const interval = setInterval(fetchBotRevenue, 60000); // Refresh every minute
+		return () => clearInterval(interval);
+	});
 
 	const ROLE_LABELS: Record<string, string> = {
 		ore_miner: "Miner-Ore",
@@ -122,7 +145,7 @@
 									<th class="pb-2 pr-4">State</th>
 									<th class="pb-2 pr-4">Location</th>
 									<th class="pb-2 pr-4 text-right">Credits</th>
-									<th class="pb-2 pr-4 text-right">Earned</th>
+									<th class="pb-2 pr-4 text-right">24h Rev</th>
 									<th class="pb-2 pr-4 text-right">Fuel</th>
 									<th class="pb-2 text-right">Cargo</th>
 								</tr>
@@ -174,8 +197,9 @@
 										<td class="py-2 pr-4 text-right mono text-star-white">
 											{bot.credits.toLocaleString()}
 										</td>
-										<td class="py-2 pr-4 text-right mono {bot.creditsPerHour >= 0 ? 'text-bio-green' : 'text-claw-red'}">
-											{bot.creditsPerHour >= 0 ? "+" : ""}{bot.creditsPerHour.toLocaleString()}
+										<td class="py-2 pr-4 text-right mono {(botRevenue24h[bot.id] ?? 0) >= 0 ? 'text-bio-green' : 'text-claw-red'}">
+											{@const rev = botRevenue24h[bot.id] ?? 0}
+											{rev >= 0 ? "+" : ""}{rev.toLocaleString()}
 										</td>
 										<td class="py-2 pr-4 text-right mono">
 											<span class={bot.fuelPct < 20 ? "text-claw-red" : bot.fuelPct < 50 ? "text-warning-yellow" : "text-star-white"}>

@@ -343,19 +343,21 @@ export function startBroadcastLoop(deps: BroadcastDeps): () => void {
       }
 
       // Memory update
-      const memStore = deps.commander.getMemoryStore();
-      if (memStore) {
-        const allMemories = await memStore.getAll();
-        broadcast({
-          type: "memory_update",
-          memories: allMemories.map((m) => ({
-            key: m.key,
-            fact: m.fact,
-            importance: m.importance,
-            updatedAt: m.updatedAt,
-          })),
-        });
-      }
+      try {
+        const memStore = deps.commander.getMemoryStore();
+        if (memStore) {
+          const allMemories = await memStore.getAll();
+          broadcast({
+            type: "memory_update",
+            memories: allMemories.map((m) => ({
+              key: m.key,
+              fact: m.fact,
+              importance: m.importance,
+              updatedAt: m.updatedAt,
+            })),
+          });
+        }
+      } catch { /* non-critical — don't block economy_update */ }
 
       // Stuck bots update
       const stuckBots = deps.commander.getStuckBots();
