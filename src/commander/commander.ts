@@ -1502,6 +1502,13 @@ export class Commander {
         const durationSec = Math.max(this.tick - prev.startTick, 30);
         const creditDelta = (bot.credits ?? 0) - (prev.credits ?? 0);
 
+        // Safety: skip absurd credit deltas (restart artifacts, faction transfers)
+        // A bot earning/losing >50K in a single eval cycle is almost certainly a data issue
+        if (Math.abs(creditDelta) > 50000) {
+          this._botSnapshots.set(bot.botId, { credits: bot.credits ?? 0, routine: bot.routine, role: (bot as any).role, startTick: this.tick, warm: true });
+          continue;
+        }
+
         // Build reward signals from credit delta + accumulated event signals
         const botSigs = this.drainBotSignals(bot.botId);
         const signals = emptySignals();
