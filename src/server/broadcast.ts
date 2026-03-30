@@ -452,8 +452,13 @@ export function startBroadcastLoop(deps: BroadcastDeps): () => void {
       if (deps.trainingLogger) {
         try {
           const totals = await deps.trainingLogger.get24hFinancialTotals();
-          if (totals.revenue > 0 || totals.cost > 0) cached24hTotals = totals;
-        } catch { /* non-critical */ }
+          if (totals.revenue > 0 || totals.cost > 0) {
+            cached24hTotals = totals;
+          }
+          console.log(`[Broadcast] 24h totals: rev=${totals.revenue} cost=${totals.cost} profit=${totals.profit}`);
+        } catch (err) {
+          console.warn(`[Broadcast] 24h totals failed: ${err instanceof Error ? err.message : err}`);
+        }
       }
     }
 
