@@ -122,7 +122,7 @@ const DEFAULT_CONFIG: ScoringConfig = {
   baseScores: {
     miner: 50,        // Reduced — ore stockpile is massive, crafters are bottleneck
     harvester: 35,    // Multi-target extraction (ice/gas), lower than miner
-    trader: 65,       // Sells refined goods — direct revenue generator
+    trader: 55,       // Demand-driven — supply bonus + market data quality drive assignment
     explorer: 35,     // Charts systems — info scarcity bonus drives priority dynamically
     crafter: 60,      // Reduced base — supply bonus + recipe viability drive assignment
     hunter: 15,       // Low priority but not dead — occasional loot value
@@ -868,47 +868,64 @@ export class ScoringBrain implements CommanderBrain {
         return minerBonus;
       }
       case "trader": {
+        const STORAGE_CAP = 100_000;
         let traderBonus = 0;
 
-        // Refined/crafted goods ready to sell (high-margin)
-        const goodsInStorage = [...economy.factionStorage.entries()]
-          .filter(([id]) => !id.includes("ore") && !id.includes("ice") && !id.includes("gas"))
-          .reduce((sum, [, qty]) => sum + qty, 0);
-        if (goodsInStorage >= 100) traderBonus += 50;
-        else if (goodsInStorage >= 50) traderBonus += 40;
-        else if (goodsInStorage >= 20) traderBonus += 25;
-        else if (goodsInStorage >= 5) traderBonus += 10;
+        // ── Faction sell signal: crafted/refined goods ready to move ──
+        const factionGoods = [...economy.factionStorage.entries()]
+          .filter(([id]) => !id.includes("ore") && !id.includes("ice") && !id.includes("gas"));
+        const totalFactionGoods = factionGoods.reduce((sum, [, qty]) => sum + qty, 0);
 
-        // Excess ore to sell (10k+ per type)
-        let oreOverstock = 0;
+        if (totalFactionGoods >= 100) traderBonus += 35;       // Strong sell pressure
+        else if (totalFactionGoods >= 50) traderBonus += 25;
+        else if (totalFactionGoods >= 20) traderBonus += 15;
+        else if (totalFactionGoods >= 5) traderBonus += 5;
+
+        // ── Ore sell signal: sell off when any ore type >60% of cap ──
+        // Starts selling earlier than 80% to prevent hitting cap
+        let oreSellPressure = 0;
         for (const [, qty] of oreBreakdown) {
-          if (qty >= 5000) oreOverstock += qty - 2000;
+          const fillPct = qty / STORAGE_CAP;
+          if (fillPct >= 0.80) oreSellPressure += 30;       // Urgent: almost full
+          else if (fillPct >= 0.60) oreSellPressure += 15;  // Start offloading
         }
-        if (oreOverstock > 0) traderBonus += Math.min(30, Math.round(oreOverstock / 500));
+        traderBonus += Math.min(40, oreSellPressure);
 
-        // Revenue awareness: if fleet has been earning, keep trading
-        if (economy.totalRevenue > 0) traderBonus += 5;
+        // ── Market data quality gate: don't trade on stale data ──
+        // Stale data risks buying where no sellers exist or selling below market
+        const freshStationCount = economy.deficits.length + economy.surpluses.length; // proxy for data coverage
+        if (freshStationCount === 0) {
+          traderBonus -= 30; // No market intelligence — trading blind is dangerous
+        }
+
+        // ── Revenue momentum: keep trading when profitable ──
+        if (economy.totalRevenue > 0 && economy.totalCosts < economy.totalRevenue) {
+          traderBonus += 10; // Fleet is net positive — keep the trades flowing
+        }
 
         return traderBonus;
       }
-      case "quartermaster":
-        // QM sells refined goods from faction storage — high-margin activity
-        {
-          const refinedGoods = [...economy.factionStorage.entries()]
-            .filter(([id]) => !id.includes("ore") && !id.includes("ice") && !id.includes("gas"))
-            .reduce((sum, [, qty]) => sum + qty, 0);
-          if (refinedGoods >= 20) return 40;
-          if (refinedGoods >= 5) return 20;
+      case "quartermaster": {
+        // QM focuses on faction logistics: selling from faction storage, restocking modules
+        // Distinguished from trader: QM sells AT home station, trader does arbitrage routes
+        const STORAGE_CAP = 100_000;
+        let qmBonus = 0;
+
+        // Faction goods to sell (QM's primary job)
+        const factionSellable = [...economy.factionStorage.entries()]
+          .filter(([id, qty]) => qty > 0 && !id.includes("ore") && !id.includes("ice") && !id.includes("gas"))
+          .reduce((sum, [, qty]) => sum + qty, 0);
+        if (factionSellable >= 50) qmBonus += 40;
+        else if (factionSellable >= 20) qmBonus += 25;
+        else if (factionSellable >= 5) qmBonus += 10;
+
+        // Ore nearing cap — QM should sell excess at home station
+        for (const [, qty] of oreBreakdown) {
+          if (qty / STORAGE_CAP >= 0.70) qmBonus += 15; // Per ore type approaching cap
         }
-        // Also sell massively overstocked ore (10k+)
-        {
-          let oreSellable = 0;
-          for (const [, qty] of oreBreakdown) {
-            if (qty >= 10000) oreSellable += qty - 5000;
-          }
-          if (oreSellable > 0) return 30;
-        }
-        return 0;
+
+        return qmBonus;
+      }
       default:
         return 0;
     }
@@ -1017,11 +1034,11 @@ export class ScoringBrain implements CommanderBrain {
         return 0;
       }
       case "trader": {
-        if (!system.hasStation) return 100;
+        if (!system.hasStation) return 40; // Traders travel — mild penalty, not a hard block
         const hasLocalMarketData = system.stationIds.some((sid) =>
           world.freshStationIds.includes(sid)
         );
-        if (!hasLocalMarketData) return 40; // No price data — trader would be guessing
+        if (!hasLocalMarketData) return 25; // Stale data — cautious penalty
         return 0;
       }
       case "crafter": {
