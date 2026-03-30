@@ -1446,6 +1446,15 @@ export class Commander {
         const durationSec = Math.max(this.tick - prev.startTick, 30);
         const creditDelta = (bot.credits ?? 0) - (prev.credits ?? 0);
 
+        // Skip absurd deltas (from restarts, snapshot mismatches, or faction transfers)
+        // Normal per-minute delta rarely exceeds ±500 cr/min
+        const perMinute = creditDelta / Math.max(durationSec / 60, 1);
+        if (Math.abs(perMinute) > 5000) {
+          // Likely a restart artifact or faction transfer — skip this episode
+          this._botSnapshots.set(bot.botId, { credits: bot.credits ?? 0, routine: bot.routine, role: (bot as any).role, startTick: this.tick });
+          continue;
+        }
+
         // Build simple reward signals from credit delta
         // Full signal extraction would require event tracking — credit delta is the main signal
         const signals = emptySignals();
