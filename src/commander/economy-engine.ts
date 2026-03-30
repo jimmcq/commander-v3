@@ -483,7 +483,11 @@ export class EconomyEngine {
       if (inStorage >= needed) continue;
       const deficit = needed - inStorage;
       // Check if this is a raw material (mine it) or crafted (craft it)
-      const isRaw = itemId.startsWith("ore_") || itemId.includes("ice") || itemId.includes("gas");
+      // Ores end with _ore, crystals with _crystal, ice/gas are harvestable
+      const isRaw = itemId.endsWith("_ore") || itemId.startsWith("ore_")
+        || itemId.endsWith("_crystal") || itemId.includes("crystal")
+        || itemId.includes("ice") || itemId.includes("gas")
+        || itemId.includes("hydrogen") || itemId.includes("argon") || itemId.includes("neon");
       orders.push({
         type: isRaw ? "mine" : "craft",
         targetId: itemId,
