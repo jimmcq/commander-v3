@@ -391,6 +391,8 @@ export class EconomyEngine {
    */
   private computeWorkOrders(deficits: SupplyDeficit[], surpluses: SupplySurplus[]): FleetWorkOrder[] {
     const orders: FleetWorkOrder[] = [];
+    const STORAGE_CAP = 100_000;
+    const facilityNeededItems = new Set(this.facilityMaterialNeeds.keys());
 
     // ── Mining orders: from deficits + low faction storage ──
     const oreStock = new Map<string, number>();
@@ -483,7 +485,11 @@ export class EconomyEngine {
       if (inStorage >= needed) continue;
       const deficit = needed - inStorage;
       // Check if this is a raw material (mine it) or crafted (craft it)
-      const isRaw = itemId.startsWith("ore_") || itemId.includes("ice") || itemId.includes("gas");
+      // Ores end with _ore, crystals with _crystal, ice/gas are harvestable
+      const isRaw = itemId.endsWith("_ore") || itemId.startsWith("ore_")
+        || itemId.endsWith("_crystal") || itemId.includes("crystal")
+        || itemId.includes("ice") || itemId.includes("gas")
+        || itemId.includes("hydrogen") || itemId.includes("argon") || itemId.includes("neon");
       orders.push({
         type: isRaw ? "mine" : "craft",
         targetId: itemId,
@@ -494,36 +500,83 @@ export class EconomyEngine {
       });
     }
 
-    // ── Sell overstocked raw ores (3000+) ──
+    // ── Sell overstocked raw ores (only when >80% of faction storage cap) ──
+    const ORE_SELL_PCT = 0.80;
+    const ORE_KEEP_PCT = 0.50; // Sell down to 50% cap, keep a healthy reserve
     for (const [itemId, qty] of oreStock) {
-      if (qty >= 3000) {
-        orders.push({
-          type: "trade",
-          targetId: itemId,
-          description: `Sell excess ${itemId.replace(/_/g, " ")}`,
-          priority: Math.min(80, 50 + Math.round((qty - 3000) / 500)),
-          reason: `overstocked: ${qty} units`,
-          quantity: qty - 1000, // Keep 1000 reserve
-        });
-      }
-    }
+      // Don't sell ores needed for facility upgrades
+      if (facilityNeededItems.has(itemId)) continue;
 
-    // ── Sell orders: faction goods with known buy orders at stations ──
-    for (const [itemId, qty] of this.factionInventory) {
-      if (qty < 10) continue;
-      // Generate sell orders for items that aren't raw ores (already covered above)
-      if (!itemId.startsWith("ore_") && !itemId.includes("ice") && !itemId.includes("gas")) {
-        if (qty >= 20) {
+      const fillPct = qty / STORAGE_CAP;
+      if (fillPct >= ORE_SELL_PCT) {
+        const keepQty = Math.floor(STORAGE_CAP * ORE_KEEP_PCT);
+        const sellQty = qty - keepQty;
+        if (sellQty > 0) {
           orders.push({
-            type: "sell",
+            type: "trade",
             targetId: itemId,
-            description: `Sell ${itemId.replace(/_/g, " ")} (${qty} available)`,
-            priority: Math.min(65, 25 + Math.round(qty / 10)),
-            reason: `${qty} units in faction storage`,
-            quantity: qty,
+            description: `Sell excess ${itemId.replace(/_/g, " ")} (${Math.round(fillPct * 100)}% full)`,
+            priority: Math.min(80, 50 + Math.round((fillPct - ORE_SELL_PCT) * 200)),
+            reason: `${Math.round(fillPct * 100)}% of cap (${qty.toLocaleString()} units)`,
+            quantity: sellQty,
           });
         }
       }
+    }
+
+    // ── Sell orders: only sell genuine surplus (not needed for facilities/crafting) ──
+    for (const [itemId, qty] of this.factionInventory) {
+      if (qty < 20) continue;
+
+      // Never sell raw ores/crystals/gas/ice (miners handle these, crafters need them)
+      const isRaw = itemId.endsWith("_ore") || itemId.startsWith("ore_")
+        || itemId.endsWith("_crystal") || itemId.includes("crystal")
+        || itemId.includes("ice") || itemId.includes("gas")
+        || itemId.includes("hydrogen") || itemId.includes("argon") || itemId.includes("neon");
+      if (isRaw) continue;
+
+      // Fleet consumables: keep a reserve, sell excess
+      const CONSUMABLE_RESERVES: Record<string, number> = {
+        fuel_cell: 200,           // Keep 200, sell excess
+        fuel_cell_premium: 50,    // Keep 50 premium
+        repair_kit: 100,          // Keep 100 repair kits
+      };
+      if (itemId in CONSUMABLE_RESERVES) {
+        const reserve = CONSUMABLE_RESERVES[itemId];
+        if (qty <= reserve) continue; // Below reserve — don't sell
+        // Sell only the excess above reserve
+        const sellableQty = qty - reserve;
+        if (sellableQty >= 20) {
+          orders.push({
+            type: "sell",
+            targetId: itemId,
+            description: `Sell ${itemId.replace(/_/g, " ")} (${sellableQty} excess, keeping ${reserve} reserve)`,
+            priority: Math.min(55, 25 + Math.round(sellableQty / 20)),
+            reason: `${qty} in stock, ${reserve} reserved, ${sellableQty} sellable`,
+            quantity: sellableQty,
+          });
+        }
+        continue;
+      }
+
+      // Never sell items needed for facility upgrades
+      if (facilityNeededItems.has(itemId)) {
+        const needed = this.facilityMaterialNeeds.get(itemId) ?? 0;
+        if (qty <= needed * 1.5) continue; // Keep 150% of what's needed as buffer
+      }
+
+      // Only sell crafted/refined goods that are genuinely surplus
+      const fillPct = qty / STORAGE_CAP;
+      if (fillPct < 0.01 && qty < 100) continue; // Too little to bother selling
+
+      orders.push({
+        type: "sell",
+        targetId: itemId,
+        description: `Sell ${itemId.replace(/_/g, " ")} (${qty} available)`,
+        priority: Math.min(65, 25 + Math.round(qty / 10)),
+        reason: `${qty} units in faction storage`,
+        quantity: qty,
+      });
     }
 
     // ── Scan orders: stations with stale or missing market data ──

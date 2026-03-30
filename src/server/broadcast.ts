@@ -252,7 +252,36 @@ export function startBroadcastLoop(deps: BroadcastDeps): () => void {
       } catch { /* non-critical */ }
     }
 
-    // ── Dashboard Broadcasts ──
+    // ── Always-on tasks (even without dashboard clients) ──
+    // Refresh 24h financial totals every 30s (used by economy_update + public stats)
+    if (tick % 10 === 0 && deps.trainingLogger) {
+      try {
+        const totals = await deps.trainingLogger.get24hFinancialTotals();
+        if (totals.revenue > 0 || totals.cost > 0) {
+          cached24hTotals = totals;
+        }
+      } catch { /* non-critical */ }
+    }
+
+    // ── Economy engine + work orders (always-on, even without clients) ──
+    if (tick % 5 === 0) {
+      const ecoEngine = deps.commander.getEconomy();
+      if (ecoEngine) {
+        // Feed cached faction storage into economy engine (persists across restarts)
+        const cachedStorage = deps.gameCache?.getFactionStorageSync();
+        if (cachedStorage && cachedStorage.length > 0) {
+          const inv = new Map<string, number>();
+          for (const item of cachedStorage) inv.set(item.itemId, item.quantity);
+          ecoEngine.updateFactionInventory(inv);
+        }
+        const snap = ecoEngine.analyze(fleet);
+        if (deps.workOrderManager) {
+          deps.workOrderManager.syncFromEconomy(snap.workOrders);
+        }
+      }
+    }
+
+    // ── Dashboard Broadcasts (skip if no clients) ──
     if (getClientCount() === 0) return;
 
     // Fleet update (every 3s) — use full BotSummary (not FleetBotInfo) for dashboard
@@ -329,19 +358,21 @@ export function startBroadcastLoop(deps: BroadcastDeps): () => void {
       }
 
       // Memory update
-      const memStore = deps.commander.getMemoryStore();
-      if (memStore) {
-        const allMemories = await memStore.getAll();
-        broadcast({
-          type: "memory_update",
-          memories: allMemories.map((m) => ({
-            key: m.key,
-            fact: m.fact,
-            importance: m.importance,
-            updatedAt: m.updatedAt,
-          })),
-        });
-      }
+      try {
+        const memStore = deps.commander.getMemoryStore();
+        if (memStore) {
+          const allMemories = await memStore.getAll();
+          broadcast({
+            type: "memory_update",
+            memories: allMemories.map((m) => ({
+              key: m.key,
+              fact: m.fact,
+              importance: m.importance,
+              updatedAt: m.updatedAt,
+            })),
+          });
+        }
+      } catch { /* non-critical — don't block economy_update */ }
 
       // Stuck bots update
       const stuckBots = deps.commander.getStuckBots();
@@ -445,10 +476,7 @@ export function startBroadcastLoop(deps: BroadcastDeps): () => void {
         cachedOrders = await pollOpenOrders(deps);
       });
 
-      // Refresh 24h financial totals from DB (persists across restarts)
-      if (deps.trainingLogger) {
-        try { cached24hTotals = await deps.trainingLogger.get24hFinancialTotals(); } catch { /* non-critical */ }
-      }
+      // (24h totals now refreshed above, outside client gate)
     }
 
     // Social feed polling (every 30s — uses bot API queries)

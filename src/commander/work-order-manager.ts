@@ -15,11 +15,45 @@ const MAX_ORDERS = 200;
 export class WorkOrderManager {
   private orders = new Map<string, PersistentWorkOrder>();
   private nextId = 1;
+  private loaded = false;
 
   constructor(
     private redis: RedisCache | null,
     private tenantId: string,
-  ) {}
+  ) {
+    // Load persisted orders from Redis on construction
+    this.loadFromRedis().catch(() => {});
+  }
+
+  /** Load work orders from Redis (survives restarts) */
+  private async loadFromRedis(): Promise<void> {
+    if (!this.redis || this.loaded) return;
+    try {
+      const cached = await this.redis.getTimed("work_orders");
+      if (cached) {
+        const parsed = JSON.parse(cached) as PersistentWorkOrder[];
+        const now = Date.now();
+        for (const order of parsed) {
+          if (now < order.expiresAt && order.status !== "completed" && order.status !== "failed") {
+            this.orders.set(order.id, order);
+          }
+        }
+        if (this.orders.size > 0) {
+          console.log(`[WorkOrders] Loaded ${this.orders.size} orders from Redis`);
+        }
+      }
+      this.loaded = true;
+    } catch { this.loaded = true; }
+  }
+
+  /** Persist current orders to Redis */
+  private async saveToRedis(): Promise<void> {
+    if (!this.redis) return;
+    try {
+      const data = JSON.stringify([...this.orders.values()]);
+      await this.redis.setTimed("work_orders", data, 3600000); // 1h TTL
+    } catch { /* non-critical */ }
+  }
 
   /** Generate a unique order ID */
   private genId(): string {
@@ -40,15 +74,29 @@ export class WorkOrderManager {
       }
     }
 
-    // Deduplicate: don't add orders that match an existing pending/claimed order
+    // Remove orders whose target is no longer in the economy engine output
+    // (e.g., faction storage filled the need — order is obsolete)
+    const activeTargets = new Set(economyOrders.map(o => `${o.type}:${o.targetId}`));
+    for (const [id, order] of this.orders) {
+      const key = `${order.type}:${order.targetId}`;
+      if (!activeTargets.has(key) && order.status === "pending") {
+        this.orders.delete(id); // No longer needed
+      }
+    }
+
+    // Deduplicate + update existing orders with fresh data
     for (const ecoOrder of economyOrders) {
       const existing = [...this.orders.values()].find(
-        o => o.type === ecoOrder.type && o.targetId === ecoOrder.targetId &&
+        o => o.targetId === ecoOrder.targetId &&
           (o.status === "pending" || o.status === "claimed" || o.status === "in_progress")
       );
       if (existing) {
-        // Update priority if changed
+        // Update with fresh data (type may have changed craft→mine, quantity updated)
+        existing.type = ecoOrder.type;
         existing.priority = Math.max(existing.priority, ecoOrder.priority);
+        existing.quantity = ecoOrder.quantity;
+        existing.description = ecoOrder.description;
+        existing.reason = ecoOrder.reason;
         continue;
       }
 
@@ -67,6 +115,9 @@ export class WorkOrderManager {
         expiresAt,
       });
     }
+
+    // Persist to Redis after sync
+    this.saveToRedis().catch(() => {});
   }
 
   /**
@@ -103,6 +154,7 @@ export class WorkOrderManager {
     order.status = "claimed";
     order.claimedBy = botId;
     order.claimedAt = Date.now();
+    this.saveToRedis().catch(() => {});
     return order;
   }
 

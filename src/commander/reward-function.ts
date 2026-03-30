@@ -57,6 +57,10 @@ export interface EpisodeSignals {
   staleScanCount: number;
   /** Number of stations scanned that were < 30min old */
   freshScanCount: number;
+  /** New resource POIs discovered (belts/clouds with ore data) */
+  resourcePoisDiscovered: number;
+  /** Scarce resources found (resources with <5% faction cap) */
+  scarceResourcesFound: number;
 }
 
 /** Computed reward with breakdown */
@@ -170,33 +174,29 @@ export function computeReward(
   breakdown.xp = xpScore;
   totalRaw += xpScore;
 
-  // Items deposited (with ore balance modifier)
+  // Items deposited (with ore balance modifier based on % of faction storage)
   let depositScore = 0;
+  const STORAGE_CAP = 100_000; // Faction lockbox cap per item type
   if (signals.oreDeposits.size > 0 && signals.factionStockLevels.size > 0) {
-    // Per-ore scoring: reward scarce ores, penalize oversupplied ones
-    // Faction storage max per item = 100,000 (tier 1 lockbox)
-    const STORAGE_MAX = 100_000;
     for (const [oreId, qty] of signals.oreDeposits) {
       const stock = signals.factionStockLevels.get(oreId) ?? 0;
-      const fillPct = stock / STORAGE_MAX;
+      const fillPct = stock / STORAGE_CAP;
+
+      // Smooth curve: reward inversely proportional to fill %
+      // 0% full → 3x reward, 25% → 1.5x, 50% → 0.5x, 75% → 0.1x, 90%+ → -0.5x
       let modifier: number;
-      if (fillPct >= 0.90) {
-        modifier = -0.5;  // >90% full: penalize (we're overflowing)
-      } else if (fillPct >= 0.75) {
-        modifier = 0.25;  // 75-90%: minimal reward
-      } else if (fillPct >= 0.50) {
-        modifier = 0.5;   // 50-75%: half reward
-      } else if (fillPct >= 0.10) {
-        modifier = 1.0;   // 10-50%: normal reward
-      } else {
-        modifier = 3.0;   // <10%: triple reward (scarce, high demand)
-      }
+      if (fillPct < 0.05) modifier = 3.0;       // Nearly empty — critical need
+      else if (fillPct < 0.25) modifier = 2.0 - (fillPct * 4); // 2.0 → 1.0 linear
+      else if (fillPct < 0.50) modifier = 1.0 - (fillPct * 1.2); // 1.0 → 0.4 linear
+      else if (fillPct < 0.75) modifier = 0.4 - (fillPct * 0.4); // 0.4 → 0.1 linear
+      else if (fillPct < 0.90) modifier = 0.1 - ((fillPct - 0.75) * 2); // 0.1 → -0.2 linear
+      else modifier = -0.5; // >90%: penalty
+
       depositScore += qty * SIGNAL_WEIGHTS.itemsDeposited * modifier * (goalMultipliers.itemsDeposited ?? 1);
     }
     breakdown.deposits = depositScore;
-    breakdown.oreBalance = depositScore; // Track balance impact separately
+    breakdown.oreBalance = depositScore;
   } else {
-    // Fallback: flat deposit scoring when no stock data available
     depositScore = signals.itemsDeposited * SIGNAL_WEIGHTS.itemsDeposited * (goalMultipliers.itemsDeposited ?? 1);
     breakdown.deposits = depositScore;
   }
@@ -218,7 +218,19 @@ export function computeReward(
   totalRaw += craftScore;
 
   // Exploration
-  const exploreScore = signals.systemsExplored * SIGNAL_WEIGHTS.systemsExplored * (goalMultipliers.systemsExplored ?? 1);
+  let exploreScore = signals.systemsExplored * SIGNAL_WEIGHTS.systemsExplored * (goalMultipliers.systemsExplored ?? 1);
+  // Resource discovery bonus: finding new belts with ore data
+  if (signals.resourcePoisDiscovered > 0) {
+    const discoveryBonus = signals.resourcePoisDiscovered * 25.0; // 25 per new resource POI
+    exploreScore += discoveryBonus;
+    breakdown.resourceDiscovery = discoveryBonus;
+  }
+  // Scarce resource bonus: finding ores we're low on
+  if (signals.scarceResourcesFound > 0) {
+    const scarceBonus = signals.scarceResourcesFound * 50.0; // 50 per scarce resource found
+    exploreScore += scarceBonus;
+    breakdown.scarceResourceFind = scarceBonus;
+  }
   breakdown.explored = exploreScore;
   totalRaw += exploreScore;
 
@@ -347,5 +359,7 @@ export function emptySignals(): EpisodeSignals {
     avgScanStalenessMs: 0,
     staleScanCount: 0,
     freshScanCount: 0,
+    resourcePoisDiscovered: 0,
+    scarceResourcesFound: 0,
   };
 }

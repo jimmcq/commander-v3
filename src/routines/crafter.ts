@@ -40,19 +40,41 @@ import {
 
 export async function* crafter(ctx: BotContext): AsyncGenerator<RoutineYield, void, void> {
   let recipeId = getParam(ctx, "recipeId", "");
-  const count = getParam(ctx, "count", 1);
+  let count = getParam(ctx, "count", 1);
   const craftStation = getParam(ctx, "craftStation", "");
+
+  // ── Check for craft work orders ──
+  let activeWorkOrder: string | null = null;
+  try {
+    const { claimWorkOrder, startWorkOrder } = await import("./work-order-helper");
+    const order = await claimWorkOrder(ctx, ["craft"]);
+    if (order) {
+      activeWorkOrder = order.id;
+      startWorkOrder(ctx, order.id);
+      // Work order targetId is an item ID (e.g., "steel_plate"), not a recipe ID
+      // Find the recipe that produces this item
+      if (order.targetId && !recipeId) {
+        const recipe = ctx.crafting.findRecipeForOutput?.(order.targetId);
+        if (recipe) {
+          recipeId = recipe.id;
+          yield `work order: craft ${order.targetId.replace(/_/g, " ")} via ${recipe.name ?? recipe.id} (priority ${order.priority})`;
+        } else {
+          yield `work order: craft ${order.targetId.replace(/_/g, " ")} — no recipe found, using auto-discovery`;
+        }
+      }
+    }
+  } catch { /* work orders optional */ }
   // Default to "storage" so crafters pull from faction storage (not just cargo)
   const materialSource = getParam<string>(ctx, "materialSource", "storage");
   const sellOutput = getParam(ctx, "sellOutput", true);
   // v0.227.0: skill requirements removed from all recipes
   // Seed from persistent cache so we never retry known facility-only recipes
-  const facilityOnlyRecipes = new Set<string>(ctx.cache.getFacilityOnlyRecipes());
+  const facilityOnlyRecipes = new Set<string>(await ctx.cache.getFacilityOnlyRecipes());
   // Track recipes that failed due to missing materials — skip them for a while
   const failedRecipes = new Set<string>();
   // Track materials that couldn't be sourced — skip any recipe needing them
   // Seeded from persistent cache so blacklist survives routine restarts
-  const unavailableMaterials = new Set<string>(ctx.cache.getUnavailableMaterials(ctx.botId));
+  const unavailableMaterials = new Set<string>(await ctx.cache.getUnavailableMaterials(ctx.botId));
   if (unavailableMaterials.size > 0) {
     console.log(`[${ctx.botId}] crafter: restored ${unavailableMaterials.size} unavailable materials from cache: ${[...unavailableMaterials].join(", ")}`);
   }
@@ -78,7 +100,15 @@ export async function* crafter(ctx: BotContext): AsyncGenerator<RoutineYield, vo
       if (needsRecipe && !facilityOnlyRecipes.has(needsRecipe.id)) {
         recipeId = needsRecipe.id;
         const needed = facilityNeeds.get(needsRecipe.outputItem) ?? 0;
-        yield `facility needs ${needed}x ${ctx.crafting.getItemName(needsRecipe.outputItem)} — crafting ${needsRecipe.name}`;
+        // Batch size: craft as many as materials allow (up to 10)
+        const rawMats = ctx.crafting.getRawMaterials(needsRecipe.id, 1);
+        let maxBatch = 10;
+        for (const [matId, perBatch] of rawMats) {
+          const available = factionInventory.get(matId) ?? 0;
+          maxBatch = Math.min(maxBatch, Math.floor(available / Math.max(perBatch, 1)));
+        }
+        count = Math.max(1, Math.min(maxBatch, Math.ceil(needed / (needsRecipe.outputQuantity || 1))));
+        yield `facility needs ${needed}x ${ctx.crafting.getItemName(needsRecipe.outputItem)} — crafting ${count}x ${needsRecipe.name}`;
       }
     }
 
@@ -160,7 +190,7 @@ export async function* crafter(ctx: BotContext): AsyncGenerator<RoutineYield, vo
 
   while (!ctx.shouldStop) {
     // ── Sync material blacklist with cache TTLs (expired entries = retry) ──
-    const currentBlacklist = ctx.cache.getUnavailableMaterials(ctx.botId);
+    const currentBlacklist = await ctx.cache.getUnavailableMaterials(ctx.botId);
     const currentSet = new Set(currentBlacklist);
     for (const mat of unavailableMaterials) {
       if (!currentSet.has(mat)) {
@@ -298,7 +328,7 @@ export async function* crafter(ctx: BotContext): AsyncGenerator<RoutineYield, vo
         // Facility-only recipes can never be manually crafted — blacklist and discover a new top-level recipe
         if (errMsg.includes("facility-only") || errMsg.includes("facility_only")) {
           facilityOnlyRecipes.add(step.recipeId);
-          ctx.cache.markFacilityOnly(step.recipeId);
+          ctx.cache.markFacilityOnly(step.recipeId).catch(() => {});
           ctx.crafting.markFacilityOnly(step.recipeId);
           yield `blacklisted ${step.recipeName} (facility-only recipe, persisted)`;
           // Bail out entirely — the chain is broken (sub-step or top-level)
@@ -420,7 +450,7 @@ export async function* crafter(ctx: BotContext): AsyncGenerator<RoutineYield, vo
         }
         // Track consecutive no-demand cycles — bail after 3 to avoid infinite algae loops
         noSellCount++;
-        ctx.cache.markRecipeNoDemand(recipe.id); // Global flag so other crafters skip this recipe too
+        ctx.cache.markRecipeNoDemand(recipe.id).catch(() => {}); // Global flag so other crafters skip this recipe too
         if (noSellCount >= 3) {
           yield `stopping: ${noSellCount} consecutive cycles with no demand for ${ctx.crafting.getItemName(recipe.outputItem)}`;
           return;
@@ -472,6 +502,15 @@ export async function* crafter(ctx: BotContext): AsyncGenerator<RoutineYield, vo
     // ── Service ──
     await refuelIfNeeded(ctx);
     await repairIfNeeded(ctx);
+
+    // Complete work order if one was claimed
+    if (activeWorkOrder) {
+      try {
+        const { completeWorkOrder } = await import("./work-order-helper");
+        completeWorkOrder(ctx, activeWorkOrder);
+        activeWorkOrder = null;
+      } catch { /* non-critical */ }
+    }
 
     yield typedYield("cycle_complete", { type: "cycle_complete", botId: ctx.botId, routine: "crafter" });
   }

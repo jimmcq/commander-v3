@@ -1,6 +1,29 @@
 <script lang="ts">
-	import { bots, fleetStats, commanderLog, activityLog, connectionState, economy } from "$stores/websocket";
+	import { onMount } from "svelte";
+	import { bots, fleetStats, commanderLog, activityLog, connectionState, economy, getAuthHeaders } from "$stores/websocket";
 	import CreditsChart from "$lib/components/CreditsChart.svelte";
+
+	// Per-bot 24h revenue from financial events
+	let botRevenue24h = $state<Record<string, number>>({});
+
+	async function fetchBotRevenue() {
+		try {
+			const res = await fetch("/api/economy/bot-breakdown?range=1d", { headers: getAuthHeaders() });
+			if (!res.ok) return;
+			const data: Array<{ botId: string; revenue: number; cost: number }> = await res.json();
+			const map: Record<string, number> = {};
+			for (const d of data) {
+				if (d.botId) map[d.botId] = Math.round((d.revenue ?? 0) - (d.cost ?? 0));
+			}
+			botRevenue24h = map;
+		} catch { /* non-critical */ }
+	}
+
+	onMount(() => {
+		fetchBotRevenue();
+		const interval = setInterval(fetchBotRevenue, 60000); // Refresh every minute
+		return () => clearInterval(interval);
+	});
 
 	const ROLE_LABELS: Record<string, string> = {
 		ore_miner: "Miner-Ore",
@@ -88,16 +111,15 @@
 		</div>
 	</div>
 
-	<div class="grid grid-cols-1 lg:grid-cols-4 gap-4">
-		<!-- Credits chart + Commander thoughts -->
-		<div class="lg:col-span-3 space-y-4">
-			<div class="card p-4">
-				<div class="h-64">
-					<CreditsChart />
-				</div>
+	<div class="space-y-4">
+		<!-- Credits chart (full width) -->
+		<div class="card p-4">
+			<div class="h-64">
+				<CreditsChart />
 			</div>
+		</div>
 
-			<!-- Bot roster table -->
+		<!-- Bot roster table (full width) -->
 			<div class="card p-4">
 				<h2 class="text-sm font-semibold text-chrome-silver uppercase tracking-wider mb-3">
 					Bot Roster
@@ -122,7 +144,7 @@
 									<th class="pb-2 pr-4">State</th>
 									<th class="pb-2 pr-4">Location</th>
 									<th class="pb-2 pr-4 text-right">Credits</th>
-									<th class="pb-2 pr-4 text-right">Earned</th>
+									<th class="pb-2 pr-4 text-right">24h Rev</th>
 									<th class="pb-2 pr-4 text-right">Fuel</th>
 									<th class="pb-2 text-right">Cargo</th>
 								</tr>
@@ -162,8 +184,10 @@
 												<span class="text-hull-grey">--</span>
 											{/if}
 										</td>
-										<td class="py-2 pr-4 text-chrome-silver text-xs max-w-[200px] truncate">
-											{bot.routineState || "--"}
+										<td class="py-2 pr-4 text-chrome-silver text-xs max-w-[350px]">
+											<span class="block truncate" title={bot.routineState || ""}>
+												{bot.routineState || "--"}
+											</span>
 										</td>
 										<td class="py-2 pr-4 text-chrome-silver text-xs">
 											{bot.systemName ?? "Unknown"}{#if bot.poiName}<span class="text-hull-grey"> - </span><span class="text-star-white">{bot.poiName}</span>{/if}
@@ -174,8 +198,8 @@
 										<td class="py-2 pr-4 text-right mono text-star-white">
 											{bot.credits.toLocaleString()}
 										</td>
-										<td class="py-2 pr-4 text-right mono {bot.creditsPerHour >= 0 ? 'text-bio-green' : 'text-claw-red'}">
-											{bot.creditsPerHour >= 0 ? "+" : ""}{bot.creditsPerHour.toLocaleString()}
+										<td class="py-2 pr-4 text-right mono {(botRevenue24h[bot.id] ?? 0) >= 0 ? 'text-bio-green' : 'text-claw-red'}">
+											{(botRevenue24h[bot.id] ?? 0) >= 0 ? "+" : ""}{(botRevenue24h[bot.id] ?? 0).toLocaleString()}
 										</td>
 										<td class="py-2 pr-4 text-right mono">
 											<span class={bot.fuelPct < 20 ? "text-claw-red" : bot.fuelPct < 50 ? "text-warning-yellow" : "text-star-white"}>
@@ -192,121 +216,5 @@
 					</div>
 				{/if}
 			</div>
-		</div>
-
-		<!-- Right sidebar (merged from Activity page) -->
-		<div class="space-y-3">
-			<!-- Commander thoughts -->
-			<div class="card p-4">
-				<h3 class="text-xs text-chrome-silver uppercase tracking-wider mb-2">Commander Thoughts</h3>
-				<div class="space-y-1.5 max-h-48 overflow-y-auto">
-					{#if $commanderLog.length === 0}
-						<p class="text-sm text-hull-grey">Commander is thinking...</p>
-					{:else}
-						{@const latest = $commanderLog[0]}
-						{#if latest.thoughts && latest.thoughts.length > 0}
-							{#each latest.thoughts as thought}
-								<p class="text-xs text-chrome-silver leading-relaxed">{thought}</p>
-							{/each}
-						{:else}
-							<p class="text-xs text-chrome-silver">{latest.reasoning}</p>
-						{/if}
-						<p class="text-hull-grey text-[10px] mt-2 border-t border-hull-grey/20 pt-1">
-							{latest.timestamp.slice(11, 19)} &middot; {latest.assignments.length} assignment(s)
-							{#if latest.brainName}
-								&middot; {latest.brainName}
-							{/if}
-						</p>
-					{/if}
-				</div>
-			</div>
-
-			<!-- Top Trades -->
-			<div class="card p-4">
-				<h3 class="text-xs text-chrome-silver uppercase tracking-wider mb-2">Top Trades</h3>
-				{#if topTrades.length === 0}
-					<p class="text-xs text-hull-grey text-center py-3">No trades yet</p>
-				{:else}
-					<div class="space-y-1.5">
-						{#each topTrades as trade}
-							<div class="text-xs">
-								<span class="text-hull-grey mono">{trade.timestamp.slice(11, 19)}</span>
-								{#if trade.botId}
-									<a href="/bots/{trade.botId}" class="text-laser-blue ml-1">{trade.botId}</a>
-								{/if}
-								<p class="text-chrome-silver truncate">{trade.message}</p>
-							</div>
-						{/each}
-					</div>
-				{/if}
-			</div>
-
-			<!-- Open Orders -->
-			<div class="card p-4">
-				<h3 class="text-xs text-chrome-silver uppercase tracking-wider mb-2">Open Orders</h3>
-				{#if !$economy?.openOrders?.length}
-					<p class="text-xs text-hull-grey text-center py-3">No orders</p>
-				{:else}
-					<div class="space-y-1.5">
-						{#each $economy.openOrders.slice(0, 5) as order}
-							<div class="flex items-center justify-between text-xs">
-								<span class="text-star-white truncate">{order.itemName}</span>
-								<span class="{order.type === 'buy' ? 'text-bio-green' : 'text-shell-orange'} mono">
-									{order.type === "buy" ? "B" : "S"} {order.priceEach}
-								</span>
-							</div>
-						{/each}
-					</div>
-				{/if}
-			</div>
-
-			<!-- Crafting Feed -->
-			<div class="card p-4">
-				<h3 class="text-xs text-chrome-silver uppercase tracking-wider mb-2">Crafting</h3>
-				{#if craftingFeed.length === 0}
-					<p class="text-xs text-hull-grey text-center py-3">No crafting</p>
-				{:else}
-					<div class="space-y-1.5">
-						{#each craftingFeed as craft}
-							<div class="text-xs">
-								<span class="text-hull-grey mono">{craft.timestamp.slice(11, 19)}</span>
-								<p class="text-chrome-silver truncate">{craft.message}</p>
-							</div>
-						{/each}
-					</div>
-				{/if}
-			</div>
-
-			<!-- Recent Activity -->
-			<div class="card p-4">
-				<h3 class="text-xs text-chrome-silver uppercase tracking-wider mb-2">Recent Activity</h3>
-				<div class="space-y-1 max-h-48 overflow-y-auto">
-					{#if $activityLog.length === 0}
-						<p class="text-sm text-hull-grey">No activity yet</p>
-					{:else}
-						{#each $activityLog.slice(0, 15) as entry}
-							<div class="flex items-start gap-2 text-xs py-0.5">
-								<span class="text-hull-grey shrink-0 mono">{entry.timestamp.slice(11, 19)}</span>
-								<span
-									class="shrink-0 {entry.level === 'error'
-										? 'text-claw-red'
-										: entry.level === 'warn'
-											? 'text-warning-yellow'
-											: entry.level === 'cmd'
-												? 'text-plasma-cyan'
-												: 'text-chrome-silver'}"
-								>
-									[{entry.level}]
-								</span>
-								{#if entry.botId}
-									<a href="/bots/{entry.botId}" class="text-laser-blue shrink-0">{entry.botId}</a>
-								{/if}
-								<span class="text-star-white truncate">{entry.message}</span>
-							</div>
-						{/each}
-					{/if}
-				</div>
-			</div>
-		</div>
 	</div>
 </div>

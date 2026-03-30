@@ -43,7 +43,7 @@ const ROUTINE_MAX_COUNT: Partial<Record<RoutineName, number>> = {
   scout: 1,
   explorer: 1, // Default; overridden by getMaxCount() for larger fleets
   quartermaster: 1, // Only one faction home manager
-  crafter: 5,      // Allow more crafters — high-end product focus with saturation guards
+  crafter: 3,      // Capped — demand-driven scoring prevents oversaturation
   scavenger: 1,    // One scavenger roaming at a time
   hunter: 1,       // Cap combat bots — burns fuel with unreliable returns
   salvager: 1,     // One salvager at a time
@@ -52,11 +52,32 @@ const ROUTINE_MAX_COUNT: Partial<Record<RoutineName, number>> = {
   ship_dealer: 1,  // One dealer at a time — capital-intensive
 };
 
-/** Dynamic max count: scales explorer cap with fleet size */
-function getMaxCount(routine: RoutineName, fleetSize: number): number | undefined {
+/** Dynamic max count: scales with fleet size and supply/demand state */
+function getMaxCount(routine: RoutineName, fleetSize: number, economy?: EconomySnapshot): number | undefined {
   if (routine === "explorer") {
-    // 1 explorer for 1-5 bots, 2 for 6-11, 3 for 12+
     return fleetSize >= 12 ? 3 : fleetSize >= 6 ? 2 : 1;
+  }
+  if (routine === "crafter" && economy) {
+    // Dynamic crafter cap: flex up when ore abundant + crafted goods low
+    const oreStock = [...economy.factionStorage.entries()]
+      .filter(([id]) => id.includes("ore"))
+      .reduce((sum, [, qty]) => sum + qty, 0);
+    const craftedStock = [...economy.factionStorage.entries()]
+      .filter(([id]) => id.startsWith("refined_") || id.startsWith("component_") || id.includes("alloy") || id.includes("circuit") || id.includes("plate"))
+      .reduce((sum, [, qty]) => sum + qty, 0);
+
+    const baseCap = ROUTINE_MAX_COUNT.crafter ?? 3;
+
+    // Abundant ore (>500) + low crafted goods (<200): flex up
+    if (oreStock > 1000 && craftedStock < 100) return Math.min(baseCap + 3, fleetSize - 3); // Up to +3 extra, leave room for other roles
+    if (oreStock > 500 && craftedStock < 200) return Math.min(baseCap + 2, fleetSize - 3);
+    if (oreStock > 200 && craftedStock < 300) return Math.min(baseCap + 1, fleetSize - 3);
+
+    // Oversaturated crafted goods (>500): flex down
+    if (craftedStock > 500) return Math.max(1, baseCap - 1);
+    if (craftedStock > 1000) return 1; // Just 1 crafter to keep intermediates flowing
+
+    return baseCap;
   }
   return ROUTINE_MAX_COUNT[routine];
 }
@@ -101,16 +122,16 @@ const DEFAULT_CONFIG: ScoringConfig = {
   baseScores: {
     miner: 50,        // Reduced — ore stockpile is massive, crafters are bottleneck
     harvester: 35,    // Multi-target extraction (ice/gas), lower than miner
-    trader: 65,       // Sells refined goods — direct revenue generator
-    explorer: 40,     // Charts systems, data gathering — useful but no direct revenue
-    crafter: 90,      // HIGHEST PRIORITY: converts ore → refined goods (10-50x value multiplier)
-    hunter: 15,       // Low priority but not dead — occasional loot value
-    salvager: 15,     // Low priority — wrecks can be profitable
-    mission_runner: 50, // Reliable income: smart mission selection, skips combat, refreshes market data
+    trader: 55,       // Demand-driven — supply bonus + market data quality drive assignment
+    explorer: 35,     // Charts systems — info scarcity bonus drives priority dynamically
+    crafter: 60,      // Reduced base — supply bonus + recipe viability drive assignment
+    hunter: 0,        // Disabled — zero episodes, no wrecks, high risk for industrial fleet
+    salvager: 0,      // Disabled — zero episodes, no data, fuel waste
+    mission_runner: 30, // Low priority — only delivery/survey missions viable, galaxy routing issues
     return_home: 5,     // Utility routine — only for idle bots away from home
-    scout: 10,          // One-shot data gathering — scored high only when data is needed
+    scout: 25,          // Market data is critical for traders and crafters
     quartermaster: 40,  // Faction home manager — sells crafted goods, reliable revenue
-    scavenger: 10,      // SUPPRESSED: burns fuel, unreliable
+    scavenger: 0,       // Disabled — burns fuel, zero data
     ship_upgrade: 0,    // Only scores > 0 when Commander queues an upgrade
     refit: 0,           // Only scores > 0 when bot has suboptimal modules for role
     ship_dealer: 30,    // Market maker — commissions ships/modules for resale
@@ -187,7 +208,7 @@ export class ScoringBrain implements CommanderBrain {
     // Also check lastRoutine for idle bots (between cycles, b.routine is null)
     const fleetSize = candidates.length;
     for (const routine of Object.keys(ROUTINE_MAX_COUNT) as RoutineName[]) {
-      const maxCount = getMaxCount(routine, fleetSize)!;
+      const maxCount = getMaxCount(routine, fleetSize, economy)!;
       const botsOnRoutine = candidates.filter(
         (b) => b.routine === routine || (!b.routine && b.lastRoutine === routine)
       );
@@ -244,7 +265,7 @@ export class ScoringBrain implements CommanderBrain {
         if (rapidAt && (now - rapidAt) < 30_000) continue; // Skip if failed within last 30s
 
         // Early skip: routine at max count from previous cycle AND bot isn't already on it
-        const maxCount = getMaxCount(routine, fleetSize);
+        const maxCount = getMaxCount(routine, fleetSize, economy);
         if (maxCount !== undefined && bot.routine !== routine) {
           const alreadyOn = routineCounts.get(routine) ?? 0;
           if (alreadyOn >= maxCount) continue;
@@ -309,7 +330,7 @@ export class ScoringBrain implements CommanderBrain {
           continue;
         }
         // Don't lock past max count — free excess bots for Pass 2
-        const maxCount = getMaxCount(effectiveRoutine, fleetSize);
+        const maxCount = getMaxCount(effectiveRoutine, fleetSize, economy);
         if (maxCount !== undefined) {
           const alreadyLocked = cycleRoutineCounts.get(effectiveRoutine) ?? 0;
           if (alreadyLocked >= maxCount) {
@@ -338,7 +359,7 @@ export class ScoringBrain implements CommanderBrain {
     }
 
     for (const [routine, bots] of routineGroups) {
-      const maxCount = getMaxCount(routine, fleetSize);
+      const maxCount = getMaxCount(routine, fleetSize, economy);
       const lockedCount = cycleRoutineCounts.get(routine) ?? 0; // Bots locked by cooldown
       const threshold = maxCount !== undefined ? Math.min(maxCount, this.config.diversityThreshold) : this.config.diversityThreshold;
       const slotsLeft = Math.max(0, threshold - lockedCount);
@@ -390,7 +411,7 @@ export class ScoringBrain implements CommanderBrain {
       // Miner fallback: if bot has 3+ rapid-completed routines, assign miner unconditionally.
       // Miner always has work (find belt, mine, sell) and prevents idle loops.
       if (bot.rapidRoutines.size >= 3 && !bot.rapidRoutines.has("miner")) {
-        const minerMaxCount = getMaxCount("miner", fleetSize);
+        const minerMaxCount = getMaxCount("miner", fleetSize, economy);
         const minerCount = cycleRoutineCounts.get("miner") ?? 0;
         if (minerMaxCount === undefined || minerCount < minerMaxCount) {
           console.log(`[Commander] Pass2: ${bot.botId} has ${bot.rapidRoutines.size} rapid routines — fallback to miner`);
@@ -426,7 +447,7 @@ export class ScoringBrain implements CommanderBrain {
 
         // Hard cap: skip if this routine has reached its max count this cycle
         // Exception: free ship switches (alreadyOwned) bypass the cap — they're instant
-        const maxCount = getMaxCount(score.routine, fleetSize);
+        const maxCount = getMaxCount(score.routine, fleetSize, economy);
         if (maxCount !== undefined) {
           const alreadyAssigned = cycleRoutineCounts.get(score.routine) ?? 0;
           if (alreadyAssigned >= maxCount) {
@@ -454,6 +475,12 @@ export class ScoringBrain implements CommanderBrain {
       }
 
       if (bestScore) {
+        // Stay idle: if best option is return_home but bot is already home and docked, skip
+        if (bestScore.routine === "return_home" && bot.docked && bot.systemId === this.homeSystem) {
+          console.log(`[Commander] ${bestScore.botId} staying idle (already home, no productive routines available)`);
+          continue;
+        }
+
         const cycleCount = cycleRoutineCounts.get(bestScore.routine) ?? 0;
         console.log(`[Commander] Pass2: ${bestScore.botId} ${effectiveRoutine ?? "idle"} → ${bestScore.routine} (adjusted=${bestAdjusted.toFixed(0)}, mustSwitch=${mustSwitch})`);
         const params = this.buildParams(bestScore.routine, bot, economy, goals, assignments, world);
@@ -819,69 +846,124 @@ export class ScoringBrain implements CommanderBrain {
     }
 
     switch (routine) {
-      case "crafter":
-        // Crafter should be strongly preferred when ore is available to process
-        // Ore is worth 10-50x more refined — crafting is the highest-margin activity
-        if (oreInStorage >= 1000) return 80; // Massive stockpile — max urgency to refine
-        if (oreInStorage >= 100) return 60;  // Large supply — need more crafters
-        if (oreInStorage >= 50) return 50;   // Good supply — keep crafting
-        if (oreInStorage >= 20) return 40;   // Decent supply
-        if (oreInStorage >= 3) return 20;    // Minimum viable batch
-        return 0;
-      case "miner": {
-        // Deficit-aware: check per-ore-type scarcity vs surplus
-        let scarceCount = 0;   // ore types with < 200 stock
-        let surplusCount = 0;  // ore types with > 5000 stock
-        for (const [, qty] of oreBreakdown) {
-          if (qty < 200) scarceCount++;
-          if (qty > 5000) surplusCount++;
+      case "crafter": {
+        // Crafter bonus based on ore availability AND sell-side demand
+        let crafterBonus = 0;
+
+        // Material availability
+        if (oreInStorage >= 500) crafterBonus += 40;      // Good stockpile to process
+        else if (oreInStorage >= 100) crafterBonus += 30;
+        else if (oreInStorage >= 20) crafterBonus += 15;
+        else if (oreInStorage >= 3) crafterBonus += 5;
+        else return -20; // No materials = don't craft
+
+        // Sell-side awareness: check if crafted goods are actually moving
+        const craftedGoods = [...economy.factionStorage.entries()]
+          .filter(([id]) => id.startsWith("refined_") || id.startsWith("component_") || id.includes("alloy") || id.includes("circuit") || id.includes("plate"));
+        const totalCraftedStock = craftedGoods.reduce((sum, [, qty]) => sum + qty, 0);
+
+        if (totalCraftedStock > 500) {
+          // Heavy inventory of unsold crafted goods — reduce crafter urgency
+          crafterBonus -= Math.min(40, Math.round(totalCraftedStock / 20));
         }
-        // If any ore type is scarce, mining is still valuable
-        if (scarceCount > 0) return 15;
-        // No scarce ores — apply heavy penalty based on total stockpile
-        if (oreInStorage < 30) return 0;
-        if (oreInStorage < 100) return -20;
-        if (oreInStorage < 1000) return -60;
-        return -120;
+
+        // Intermediate demand: if any intermediate has 0 stock and recipes need it, urgent
+        const intermediatesDepleted = craftedGoods.filter(([, qty]) => qty === 0).length;
+        if (intermediatesDepleted > 0) {
+          crafterBonus += intermediatesDepleted * 10; // Each depleted intermediate adds urgency
+        }
+
+        return crafterBonus;
       }
-      case "trader":
-        // Trader gets bonus when refined/crafted goods are in storage (ready to sell)
-        // These are the high-margin items — ore refined into valuable products
-        {
-          const goodsInStorage = [...economy.factionStorage.entries()]
-            .filter(([id]) => !id.includes("ore") && !id.includes("ice") && !id.includes("gas"))
-            .reduce((sum, [, qty]) => sum + qty, 0);
-          if (goodsInStorage >= 50) return 50;  // Lots of refined goods — sell urgently
-          if (goodsInStorage >= 20) return 35;
-          if (goodsInStorage >= 5) return 15;
+      case "miner": {
+        // % of faction storage capacity drives miner urgency
+        // Faction lockbox: 100,000 per item type. Total ore capacity depends on ore types tracked.
+        const STORAGE_CAP_PER_ITEM = 100_000;
+        const oreTypes = Math.max(oreBreakdown.size, 1);
+        const totalOreCap = oreTypes * STORAGE_CAP_PER_ITEM;
+        const oreFillPct = oreInStorage / totalOreCap;
+
+        // Smooth linear curve: 100% empty = +60 bonus, 100% full = -60 penalty
+        // Crossover at ~40% fill (slight positive encouragement to keep mining)
+        let minerBonus = Math.round(60 - (oreFillPct * 150));
+        minerBonus = Math.max(-60, Math.min(60, minerBonus));
+
+        // Per-ore scarcity override: even if total is high, mine what's missing
+        let scarceCount = 0;
+        for (const [, qty] of oreBreakdown) {
+          const itemFillPct = qty / STORAGE_CAP_PER_ITEM;
+          if (itemFillPct < 0.01) scarceCount++; // <1% of cap = scarce
         }
-        // Only sell raw ore as last resort when massively overstocked (10k+)
-        {
-          let oreOverstock = 0;
-          for (const [, qty] of oreBreakdown) {
-            if (qty >= 10000) oreOverstock += qty - 5000;
-          }
-          if (oreOverstock > 0) return 40; // Sell excess ore
+        if (scarceCount > 0) minerBonus += scarceCount * 15;
+
+        // Per-ore surplus: each type >50% cap adds penalty
+        let surplusCount = 0;
+        for (const [, qty] of oreBreakdown) {
+          if (qty / STORAGE_CAP_PER_ITEM > 0.50) surplusCount++;
         }
-        return 0;
-      case "quartermaster":
-        // QM sells refined goods from faction storage — high-margin activity
-        {
-          const refinedGoods = [...economy.factionStorage.entries()]
-            .filter(([id]) => !id.includes("ore") && !id.includes("ice") && !id.includes("gas"))
-            .reduce((sum, [, qty]) => sum + qty, 0);
-          if (refinedGoods >= 20) return 40;
-          if (refinedGoods >= 5) return 20;
+        if (surplusCount > 0 && scarceCount === 0) minerBonus -= surplusCount * 10;
+
+        return minerBonus;
+      }
+      case "trader": {
+        const STORAGE_CAP = 100_000;
+        let traderBonus = 0;
+
+        // ── Faction sell signal: crafted/refined goods ready to move ──
+        const factionGoods = [...economy.factionStorage.entries()]
+          .filter(([id]) => !id.includes("ore") && !id.includes("ice") && !id.includes("gas"));
+        const totalFactionGoods = factionGoods.reduce((sum, [, qty]) => sum + qty, 0);
+
+        if (totalFactionGoods >= 100) traderBonus += 35;       // Strong sell pressure
+        else if (totalFactionGoods >= 50) traderBonus += 25;
+        else if (totalFactionGoods >= 20) traderBonus += 15;
+        else if (totalFactionGoods >= 5) traderBonus += 5;
+
+        // ── Ore sell signal: sell off when any ore type >60% of cap ──
+        // Starts selling earlier than 80% to prevent hitting cap
+        let oreSellPressure = 0;
+        for (const [, qty] of oreBreakdown) {
+          const fillPct = qty / STORAGE_CAP;
+          if (fillPct >= 0.80) oreSellPressure += 30;       // Urgent: almost full
+          else if (fillPct >= 0.60) oreSellPressure += 15;  // Start offloading
         }
-        // Also sell massively overstocked ore (10k+)
-        {
-          let oreSellable = 0;
-          for (const [, qty] of oreBreakdown) {
-            if (qty >= 10000) oreSellable += qty - 5000;
-          }
-          if (oreSellable > 0) return 30;
+        traderBonus += Math.min(40, oreSellPressure);
+
+        // ── Market data quality gate: don't trade on stale data ──
+        // Stale data risks buying where no sellers exist or selling below market
+        const freshStationCount = economy.deficits.length + economy.surpluses.length; // proxy for data coverage
+        if (freshStationCount === 0) {
+          traderBonus -= 30; // No market intelligence — trading blind is dangerous
         }
-        return 0;
+
+        // ── Revenue momentum: keep trading when profitable ──
+        if (economy.totalRevenue > 0 && economy.totalCosts < economy.totalRevenue) {
+          traderBonus += 10; // Fleet is net positive — keep the trades flowing
+        }
+
+        return traderBonus;
+      }
+      case "quartermaster": {
+        // QM focuses on faction logistics: selling from faction storage, restocking modules
+        // Distinguished from trader: QM sells AT home station, trader does arbitrage routes
+        const STORAGE_CAP = 100_000;
+        let qmBonus = 0;
+
+        // Faction goods to sell (QM's primary job)
+        const factionSellable = [...economy.factionStorage.entries()]
+          .filter(([id, qty]) => qty > 0 && !id.includes("ore") && !id.includes("ice") && !id.includes("gas"))
+          .reduce((sum, [, qty]) => sum + qty, 0);
+        if (factionSellable >= 50) qmBonus += 40;
+        else if (factionSellable >= 20) qmBonus += 25;
+        else if (factionSellable >= 5) qmBonus += 10;
+
+        // Ore nearing cap — QM should sell excess at home station
+        for (const [, qty] of oreBreakdown) {
+          if (qty / STORAGE_CAP >= 0.70) qmBonus += 15; // Per ore type approaching cap
+        }
+
+        return qmBonus;
+      }
       default:
         return 0;
     }
@@ -990,11 +1072,11 @@ export class ScoringBrain implements CommanderBrain {
         return 0;
       }
       case "trader": {
-        if (!system.hasStation) return 100;
+        if (!system.hasStation) return 40; // Traders travel — mild penalty, not a hard block
         const hasLocalMarketData = system.stationIds.some((sid) =>
           world.freshStationIds.includes(sid)
         );
-        if (!hasLocalMarketData) return 40; // No price data — trader would be guessing
+        if (!hasLocalMarketData) return 25; // Stale data — cautious penalty
         return 0;
       }
       case "crafter": {
@@ -1125,9 +1207,11 @@ export class ScoringBrain implements CommanderBrain {
           return -150; // Very strong bonus — override nearly everything
         }
 
-        // Already at home base (docked) → block
-        if (this.homeBase && bot.docked && bot.systemId === this.homeSystem) return 200;
-        // Already in home system → mild penalty (might still need to dock)
+        // Already at home base (docked) → hard block (prevents stuck loops)
+        if (this.homeBase && bot.docked && bot.systemId === this.homeSystem) return 500;
+        // Already in home system and docked somewhere → block
+        if (this.homeSystem && bot.systemId === this.homeSystem && bot.docked) return 300;
+        // Already in home system undocked → mild penalty (might still need to dock)
         if (this.homeSystem && bot.systemId === this.homeSystem) return 60;
         // Bot is idle (no routine) and away from home → big BONUS (negative penalty)
         if (!bot.routine) return -80;

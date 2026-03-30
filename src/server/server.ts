@@ -31,6 +31,8 @@ export interface ServerOptions {
   requireAuth?: boolean;
   /** Bot manager for public stats */
   botManager?: { getAllBots(): Array<{ username: string; status: string; routine: string | null; role?: string }> };
+  /** Work order manager for QM dashboard */
+  workOrderManager?: import("../commander/work-order-manager").WorkOrderManager;
   /** Start time for uptime calculation */
   startTime?: number;
   onClientMessage?: (ws: ServerWebSocket<WsData>, msg: ClientMessage) => void;
@@ -95,6 +97,9 @@ export function createServer(opts: ServerOptions) {
         }
         if (url.pathname === "/api/public/learning") {
           return handlePublicLearning(opts);
+        }
+        if (url.pathname === "/api/public/work-orders") {
+          return handlePublicWorkOrders(opts);
         }
         if (url.pathname === "/api/public/training-stats" && opts.trainingLogger) {
           const stats = await opts.trainingLogger.getStats();
@@ -336,9 +341,18 @@ async function handleCreditsRoute(url: URL, db: DB): Promise<Response> {
   const rows = await db.select().from(creditHistory)
     .where(gt(creditHistory.timestamp, since));
 
+  // Filter out restart dips: skip points where activeBots=0 or credits drops >50%
+  let lastCredits = 0;
+  const filtered = rows.filter(r => {
+    if (r.activeBots === 0) return false; // Bots not logged in yet after restart
+    if (lastCredits > 0 && r.totalCredits < lastCredits * 0.5) return false; // Restart dip
+    lastCredits = r.totalCredits;
+    return true;
+  });
+
   return Response.json(
-    rows.map(r => ({
-      time: new Date(r.timestamp).toISOString(),
+    filtered.map(r => ({
+      time: new Date(Number(r.timestamp)).toISOString(),
       credits: r.totalCredits,
       activeBots: r.activeBots,
     }))
@@ -593,6 +607,37 @@ async function handleLogin(req: Request, opts: ServerOptions): Promise<Response>
   }
 }
 
+/** GET /api/public/work-orders — work order status for QM dashboard */
+async function handlePublicWorkOrders(opts: ServerOptions): Promise<Response> {
+  const wom = opts.workOrderManager;
+  if (!wom) return Response.json({ orders: [], stats: { total: 0, pending: 0, claimed: 0, inProgress: 0, completed: 0 } });
+
+  const orders = wom.getAll().map(o => ({
+    id: o.id,
+    type: o.type,
+    targetId: o.targetId,
+    description: o.description,
+    priority: o.priority,
+    reason: o.reason,
+    quantity: o.quantity ?? null,
+    stationId: o.stationId ?? null,
+    status: o.status,
+    claimedBy: o.claimedBy,
+    claimedAt: o.claimedAt,
+    createdAt: o.createdAt,
+    expiresAt: o.expiresAt,
+    ageMin: Math.round((Date.now() - o.createdAt) / 60000),
+  }));
+
+  return new Response(JSON.stringify({
+    orders,
+    stats: wom.getStats(),
+    timestamp: new Date().toISOString(),
+  }), {
+    headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+  });
+}
+
 /** GET /api/public/learning — bandit brain learning data for website display */
 async function handlePublicLearning(opts: ServerOptions): Promise<Response> {
   const db = opts.db;
@@ -641,7 +686,16 @@ async function handlePublicLearning(opts: ServerOptions): Promise<Response> {
           ORDER BY hour`
     ) as Array<{ hour: string; episodes: number; avg_reward: number; positive_pct: number }>;
 
-    // 5. Total stats
+    // 5. Per-role reward trend (hourly, last 24h)
+    const roleRewardTrend = await (db as any).execute(
+      sql`SELECT role, DATE_TRUNC('hour', created_at::timestamp) as hour,
+              COUNT(*) as episodes, ROUND(AVG(reward)::numeric, 2) as avg_reward
+          FROM bandit_episodes WHERE created_at::timestamp >= ${sinceStr}::timestamp
+          GROUP BY role, DATE_TRUNC('hour', created_at::timestamp)
+          ORDER BY role, hour`
+    ) as Array<{ role: string; hour: string; episodes: number; avg_reward: number }>;
+
+    // 6. Total stats
     const [totalRow] = await (db as any).execute(
       sql`SELECT COUNT(*) as total, COUNT(DISTINCT role) as roles, COUNT(DISTINCT routine) as routines,
               ROUND(AVG(reward)::numeric, 2) as avg_reward
@@ -658,6 +712,9 @@ async function handlePublicLearning(opts: ServerOptions): Promise<Response> {
       topCombos: topCombos ?? [],
       rewardTrend: (rewardTrend ?? []).map(r => ({
         hour: r.hour, episodes: +r.episodes, avgReward: +r.avg_reward, positivePct: +r.positive_pct,
+      })),
+      roleRewardTrend: (roleRewardTrend ?? []).map(r => ({
+        role: r.role, hour: r.hour, episodes: +r.episodes, avgReward: +r.avg_reward,
       })),
       totals: totalRow ? { episodes: +totalRow.total, roles: +totalRow.roles, routines: +totalRow.routines, avgReward: +totalRow.avg_reward } : null,
       timestamp: new Date().toISOString(),

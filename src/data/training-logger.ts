@@ -227,29 +227,41 @@ export class TrainingLogger {
     botId: string; action: "buy" | "sell" | "craft"; itemId: string;
     quantity: number; priceEach: number; total: number; stationId?: string;
   }): Promise<void> {
-    await this.db.insert(tradeLog).values({
-      tenantId: this.tenantId,
-      timestamp: Date.now(), botId: params.botId, action: params.action,
-      itemId: params.itemId, quantity: params.quantity, priceEach: params.priceEach,
-      total: params.total, stationId: params.stationId ?? null,
-    });
+    try {
+      await this.db.insert(tradeLog).values({
+        tenantId: this.tenantId,
+        timestamp: Date.now(), botId: params.botId, action: params.action,
+        itemId: params.itemId || "unknown", quantity: params.quantity || 0,
+        priceEach: params.priceEach || 0, total: params.total || 0,
+        stationId: params.stationId ?? null,
+      });
+    } catch (err) {
+      console.warn(`[TrainingLogger] logTrade failed: ${err instanceof Error ? err.message : err}`);
+    }
   }
 
   /** Get 24h revenue/cost/profit totals from persisted financial events */
   async get24hFinancialTotals(): Promise<{ revenue: number; cost: number; profit: number }> {
     const since = Date.now() - 24 * 60 * 60 * 1000;
-    const rows = await this.db.execute(sql`
-      SELECT
-        SUM(CASE WHEN ${financialEvents.eventType} = 'revenue' THEN ${financialEvents.amount} ELSE 0 END) as revenue,
-        SUM(CASE WHEN ${financialEvents.eventType} = 'cost' THEN ${financialEvents.amount} ELSE 0 END) as cost
-      FROM ${financialEvents}
-      WHERE ${financialEvents.tenantId} = ${this.tenantId}
-        AND ${financialEvents.timestamp} >= ${since}
-    `) as unknown as Array<{ revenue: number | null; cost: number | null }>;
-    const r = rows[0] ?? { revenue: 0, cost: 0 };
-    const revenue = r.revenue ?? 0;
-    const cost = r.cost ?? 0;
-    return { revenue, cost, profit: revenue - cost };
+    try {
+      const result = await (this.db as any).execute(sql`
+        SELECT
+          COALESCE(SUM(CASE WHEN ${financialEvents.eventType} = 'revenue' THEN ${financialEvents.amount} ELSE 0 END), 0) as revenue,
+          COALESCE(SUM(CASE WHEN ${financialEvents.eventType} = 'cost' THEN ${financialEvents.amount} ELSE 0 END), 0) as cost
+        FROM ${financialEvents}
+        WHERE ${financialEvents.tenantId} = ${this.tenantId}
+          AND ${financialEvents.timestamp} >= ${since}
+      `);
+      // Handle both postgres.js (array) and Drizzle (rows property) formats
+      const rows = Array.isArray(result) ? result : (result?.rows ?? [result]);
+      const r = rows[0] ?? { revenue: 0, cost: 0 };
+      const revenue = Number(r.revenue ?? 0);
+      const cost = Number(r.cost ?? 0);
+      return { revenue, cost, profit: revenue - cost };
+    } catch (err) {
+      console.warn(`[TrainingLogger] get24hFinancialTotals failed: ${err instanceof Error ? err.message : err}`);
+      return { revenue: 0, cost: 0, profit: 0 };
+    }
   }
 
   async getRecentTrades(sinceMs: number, limit = 100): Promise<Array<{

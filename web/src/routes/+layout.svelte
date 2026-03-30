@@ -55,7 +55,8 @@
 		{ href: "/faction", label: "Faction", key: "6" },
 		{ href: "/training", label: "Training", key: "7" },
 		{ href: "/learning", label: "Learning", key: "8" },
-		{ href: "/manual", label: "Manual", key: "9" },
+		{ href: "/quartermaster", label: "QM", key: "9" },
+		{ href: "/manual", label: "Manual", key: "0" },
 	];
 
 	function isActive(href: string, pathname: string): boolean {

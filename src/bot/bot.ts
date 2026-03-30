@@ -38,6 +38,7 @@ export interface BotDeps {
   logger: TrainingLogger;
   eventBus: EventBus;
   getFleetStatus: () => FleetStatus;
+  workOrderManager?: import("../commander/work-order-manager").WorkOrderManager;
 }
 
 export class Bot {
@@ -647,6 +648,7 @@ export class Bot {
       logger: deps.logger,
       eventBus: deps.eventBus,
       getFleetStatus: deps.getFleetStatus,
+      workOrderManager: deps.workOrderManager,
       params: this._params,
       settings: this.settings,
       fleetConfig: this.fleetConfig,

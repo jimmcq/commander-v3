@@ -119,6 +119,9 @@ export interface BotContext {
   // Fleet awareness
   getFleetStatus: () => FleetStatus;
 
+  // Work order system (QM-generated fleet priorities)
+  workOrderManager?: import("../commander/work-order-manager").WorkOrderManager;
+
   // Routine params (set by Commander)
   params: RoutineParams;
 

@@ -35,6 +35,7 @@ export interface SharedServices {
   logger: TrainingLogger;
   sessionStore: SessionStore;
   eventBus: EventBus;
+  workOrderManager?: import("../commander/work-order-manager").WorkOrderManager;
 }
 
 export interface BotManagerConfig {
@@ -219,6 +220,7 @@ export class BotManager {
       logger: this.services.logger,
       eventBus: this.services.eventBus,
       getFleetStatus: () => this.getFleetStatus(),
+      workOrderManager: this.services.workOrderManager,
     };
 
     bot.setDeps(deps);
