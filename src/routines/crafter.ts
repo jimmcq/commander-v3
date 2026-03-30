@@ -51,9 +51,16 @@ export async function* crafter(ctx: BotContext): AsyncGenerator<RoutineYield, vo
     if (order) {
       activeWorkOrder = order.id;
       startWorkOrder(ctx, order.id);
+      // Work order targetId is an item ID (e.g., "steel_plate"), not a recipe ID
+      // Find the recipe that produces this item
       if (order.targetId && !recipeId) {
-        recipeId = order.targetId;
-        yield `work order: craft ${order.targetId.replace(/_/g, " ")} (priority ${order.priority})`;
+        const recipe = ctx.crafting.findRecipeForOutput?.(order.targetId);
+        if (recipe) {
+          recipeId = recipe.id;
+          yield `work order: craft ${order.targetId.replace(/_/g, " ")} via ${recipe.name ?? recipe.id} (priority ${order.priority})`;
+        } else {
+          yield `work order: craft ${order.targetId.replace(/_/g, " ")} — no recipe found, using auto-discovery`;
+        }
       }
     }
   } catch { /* work orders optional */ }
