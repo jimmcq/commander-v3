@@ -89,6 +89,7 @@ export class TrainingLogger {
       commanderGoal: params.commanderGoal ?? null,
       gameVersion: this.gameVersion,
       commanderVersion: COMMANDER_VERSION,
+      createdAt: new Date().toISOString(),
     });
   }
 
@@ -129,6 +130,7 @@ export class TrainingLogger {
       success: params.success ? 1 : 0,
       gameVersion: this.gameVersion,
       commanderVersion: COMMANDER_VERSION,
+      createdAt: new Date().toISOString(),
     });
   }
 
@@ -142,11 +144,13 @@ export class TrainingLogger {
     if (!this.enabled.marketHistory) return;
     if (prices.length === 0) return;
 
+    const now = new Date().toISOString();
     const rows = prices.map((p) => ({
       tenantId: this.tenantId,
       tick, stationId, itemId: p.itemId,
       buyPrice: p.buyPrice, sellPrice: p.sellPrice,
       buyVolume: p.buyVolume, sellVolume: p.sellVolume,
+      createdAt: now,
     }));
 
     await this.db.insert(marketHistory).values(rows);
@@ -169,6 +173,7 @@ export class TrainingLogger {
       economyState: params.economyState ? JSON.stringify(params.economyState) : null,
       gameVersion: this.gameVersion,
       commanderVersion: COMMANDER_VERSION,
+      createdAt: new Date().toISOString(),
     });
   }
 
