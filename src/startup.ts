@@ -458,6 +458,40 @@ export async function startup(config: AppConfig): Promise<AppServices> {
   runDiscovery(); // Initial attempt (will likely fail before bots login)
   discoveryTimer = setInterval(runDiscovery, 60_000); // Retry every 60s until found
 
+  // ── Fleet-wide order cleanup (runs once 90s after startup) ──
+  // Cancels orphaned sell orders for raw ores/crystals/facility materials across ALL bots
+  setTimeout(async () => {
+    const facilityNeeds = gameCache.getFacilityMaterialNeeds?.() ?? new Map<string, number>();
+    const protectedItems = new Set(facilityNeeds.keys());
+    let cancelled = 0;
+
+    for (const bot of botManager.getAllBots()) {
+      if (!bot.api || bot.status !== "running") continue;
+      try {
+        const orders = await bot.api.viewOrders();
+        const sellOrders = orders.filter((o: any) => o.type === "sell");
+        for (const order of sellOrders) {
+          const id = order.itemId ?? order.item_id ?? "";
+          const isRaw = id.endsWith("_ore") || id.startsWith("ore_")
+            || id.endsWith("_crystal") || id.includes("crystal")
+            || id.includes("ice") || id.includes("gas");
+          const isFacilityNeeded = protectedItems.has(id);
+
+          if (isRaw || isFacilityNeeded) {
+            try {
+              await bot.api.cancelOrder(order.id ?? order.order_id);
+              cancelled++;
+              console.log(`[Cleanup] Cancelled sell order: ${bot.username} selling ${id} (${isRaw ? "raw material" : "facility need"})`);
+            } catch { /* order may already be filled/cancelled */ }
+          }
+        }
+      } catch { /* bot may not be docked */ }
+    }
+    if (cancelled > 0) {
+      console.log(`[Cleanup] Cancelled ${cancelled} orphaned sell orders across fleet`);
+    }
+  }, 90_000); // Run 90s after startup (bots need time to login)
+
   // ── Web Server ──
   const routerDeps: MessageRouterDeps = {
     botManager,
