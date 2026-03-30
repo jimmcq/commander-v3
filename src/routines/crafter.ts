@@ -40,7 +40,7 @@ import {
 
 export async function* crafter(ctx: BotContext): AsyncGenerator<RoutineYield, void, void> {
   let recipeId = getParam(ctx, "recipeId", "");
-  const count = getParam(ctx, "count", 1);
+  let count = getParam(ctx, "count", 1);
   const craftStation = getParam(ctx, "craftStation", "");
 
   // ── Check for craft work orders ──
@@ -100,7 +100,15 @@ export async function* crafter(ctx: BotContext): AsyncGenerator<RoutineYield, vo
       if (needsRecipe && !facilityOnlyRecipes.has(needsRecipe.id)) {
         recipeId = needsRecipe.id;
         const needed = facilityNeeds.get(needsRecipe.outputItem) ?? 0;
-        yield `facility needs ${needed}x ${ctx.crafting.getItemName(needsRecipe.outputItem)} — crafting ${needsRecipe.name}`;
+        // Batch size: craft as many as materials allow (up to 10)
+        const rawMats = ctx.crafting.getRawMaterials(needsRecipe.id, 1);
+        let maxBatch = 10;
+        for (const [matId, perBatch] of rawMats) {
+          const available = factionInventory.get(matId) ?? 0;
+          maxBatch = Math.min(maxBatch, Math.floor(available / Math.max(perBatch, 1)));
+        }
+        count = Math.max(1, Math.min(maxBatch, Math.ceil(needed / (needsRecipe.outputQuantity || 1))));
+        yield `facility needs ${needed}x ${ctx.crafting.getItemName(needsRecipe.outputItem)} — crafting ${count}x ${needsRecipe.name}`;
       }
     }
 
