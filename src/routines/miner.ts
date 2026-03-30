@@ -305,7 +305,7 @@ export async function* miner(ctx: BotContext): AsyncGenerator<RoutineYield, void
         if (!ctx.cargo.hasSpace(ctx.ship, 1)) break;
 
         const oreLabel = lastMinedOre ? lastMinedOre.replace(/_/g, " ") : "";
-        const cargoFill = Math.round(ctx.cargo.usedPct(ctx.ship));
+        const cargoFill = ctx.ship.cargoCapacity > 0 ? Math.round((ctx.ship.cargoUsed / ctx.ship.cargoCapacity) * 100) : 0;
         yield `mining ${oreLabel}${totalMined > 0 ? ` (${totalMined} mined, ${cargoFill}% full)` : ""}`;
         try {
           const result = await ctx.api.mine();
