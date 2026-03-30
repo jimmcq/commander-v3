@@ -74,15 +74,29 @@ export class WorkOrderManager {
       }
     }
 
-    // Deduplicate: don't add orders that match an existing pending/claimed order
+    // Remove orders whose target is no longer in the economy engine output
+    // (e.g., faction storage filled the need — order is obsolete)
+    const activeTargets = new Set(economyOrders.map(o => `${o.type}:${o.targetId}`));
+    for (const [id, order] of this.orders) {
+      const key = `${order.type}:${order.targetId}`;
+      if (!activeTargets.has(key) && order.status === "pending") {
+        this.orders.delete(id); // No longer needed
+      }
+    }
+
+    // Deduplicate + update existing orders with fresh data
     for (const ecoOrder of economyOrders) {
       const existing = [...this.orders.values()].find(
-        o => o.type === ecoOrder.type && o.targetId === ecoOrder.targetId &&
+        o => o.targetId === ecoOrder.targetId &&
           (o.status === "pending" || o.status === "claimed" || o.status === "in_progress")
       );
       if (existing) {
-        // Update priority if changed
+        // Update with fresh data (type may have changed craft→mine, quantity updated)
+        existing.type = ecoOrder.type;
         existing.priority = Math.max(existing.priority, ecoOrder.priority);
+        existing.quantity = ecoOrder.quantity;
+        existing.description = ecoOrder.description;
+        existing.reason = ecoOrder.reason;
         continue;
       }
 
