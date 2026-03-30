@@ -125,13 +125,13 @@ const DEFAULT_CONFIG: ScoringConfig = {
     trader: 55,       // Demand-driven — supply bonus + market data quality drive assignment
     explorer: 35,     // Charts systems — info scarcity bonus drives priority dynamically
     crafter: 60,      // Reduced base — supply bonus + recipe viability drive assignment
-    hunter: 15,       // Low priority but not dead — occasional loot value
-    salvager: 15,     // Low priority — wrecks can be profitable
-    mission_runner: 45, // Reliable income — deprioritized slightly so miners/crafters/traders lead
+    hunter: 0,        // Disabled — zero episodes, no wrecks, high risk for industrial fleet
+    salvager: 0,      // Disabled — zero episodes, no data, fuel waste
+    mission_runner: 30, // Low priority — only delivery/survey missions viable, galaxy routing issues
     return_home: 5,     // Utility routine — only for idle bots away from home
     scout: 25,          // Market data is critical for traders and crafters
     quartermaster: 40,  // Faction home manager — sells crafted goods, reliable revenue
-    scavenger: 10,      // SUPPRESSED: burns fuel, unreliable
+    scavenger: 0,       // Disabled — burns fuel, zero data
     ship_upgrade: 0,    // Only scores > 0 when Commander queues an upgrade
     refit: 0,           // Only scores > 0 when bot has suboptimal modules for role
     ship_dealer: 30,    // Market maker — commissions ships/modules for resale
