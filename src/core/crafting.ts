@@ -320,13 +320,22 @@ export class Crafting {
     const available = this.getAvailableRecipes(skills);
     if (available.length === 0) return null;
 
+    // Find all recipes that produce needed items, pick the most efficient
     let best: Recipe | null = null;
-    let bestNeed = 0;
+    let bestScore = -Infinity;
     for (const recipe of available) {
       if (!this.isChainViable(recipe.id)) continue;
       const needed = needs.get(recipe.outputItem) ?? 0;
-      if (needed > 0 && needed > bestNeed) {
-        bestNeed = needed;
+      if (needed <= 0) continue;
+
+      // Score: output quantity per total input quantity (higher = more efficient)
+      const totalInputs = recipe.ingredients.reduce((sum, i) => sum + i.quantity, 0);
+      const efficiency = (recipe.outputQuantity || 1) / Math.max(totalInputs, 1);
+      // Weight by need urgency + efficiency
+      const score = needed * 0.1 + efficiency * 100;
+
+      if (score > bestScore) {
+        bestScore = score;
         best = recipe;
       }
     }
