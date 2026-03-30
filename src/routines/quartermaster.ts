@@ -1007,13 +1007,17 @@ async function* manageMaterialBuyOrders(
 
     const age = now - order.placedAt;
     const stock = factionStock.get(order.itemId) ?? 0;
+    const isOre = order.itemId.startsWith("ore_") || order.itemId.endsWith("_ore");
+    const CANCEL_STORAGE_CAP = 100_000;
+    // Cancel when stock reaches 10% cap (ore) or 50 units (materials)
+    const cancelThreshold = isOre ? Math.floor(CANCEL_STORAGE_CAP * 0.10) : 50;
 
-    if (age > order.maxAgeMs || stock >= 20) {
+    if (age > order.maxAgeMs || stock >= cancelThreshold) {
       try {
         await ctx.api.cancelOrder(orderId);
         tracked.delete(orderId);
         actionsThisCycle++;
-        const reason = stock >= 20 ? "sufficient stock" : "expired";
+        const reason = stock >= cancelThreshold ? `sufficient stock (${stock})` : "expired";
         yield `cancelled buy order: ${order.itemName} (${reason})`;
       } catch (err) {
         yield `cancel failed for ${order.itemName}: ${err instanceof Error ? err.message : String(err)}`;
@@ -1217,16 +1221,45 @@ function identifyBuyOrderTargets(
     }
   }
 
+  // ── Facility upgrade materials: highest priority buy orders ──
+  const facilityNeeds = ctx.cache.getFacilityMaterialNeeds?.() ?? new Map<string, number>();
+  for (const [itemId, needed] of facilityNeeds) {
+    const stock = factionStock.get(itemId) ?? 0;
+    if (stock >= needed) continue;
+
+    const deficit = needed - stock;
+    const entry = idx.get(itemId);
+    const marketPrice = entry?.medianBuy ?? entry?.cheapestBuy ?? 0;
+    if (!marketPrice || marketPrice === Infinity) continue;
+
+    // Facility materials: pay up to 2x median (these are strategic)
+    const buyPrice = Math.max(1, Math.min(Math.floor(marketPrice * 2.0), MAX_MATERIAL_BUY_PRICE));
+
+    targets.set(`facility_${itemId}`, {
+      itemId,
+      itemName: ctx.crafting.getItemName(itemId) || itemId.replace(/_/g, " "),
+      quantityNeeded: Math.min(deficit, 200),
+      maxBuyPrice: buyPrice,
+      recommendedPrice: buyPrice,
+      recipeIds: [],
+      expectedMargin: 99999, // Always sort to top (facility priority)
+    });
+  }
+
   // ── Ore buy orders: buy ores at ~50% market rate when stock is low ──
-  const ORE_LOW_STOCK = 50;   // Below this, place buy orders
-  const ORE_TARGET_STOCK = 100; // Buy up to this amount
-  const ORE_PRICE_FRACTION = 0.50; // Buy at 50% of market rate
+  // Use % of faction storage cap (100K per item type)
+  const STORAGE_CAP = 100_000;
+  const ORE_LOW_PCT = 0.05;    // Below 5% cap → place buy orders
+  const ORE_TARGET_PCT = 0.10; // Buy up to 10% cap
+  const ORE_PRICE_FRACTION = 0.50;
 
   for (const [oreId, recipeMargin] of oreRecipeMargins) {
     const stock = factionStock.get(oreId) ?? 0;
-    if (stock >= ORE_LOW_STOCK) continue; // Miners are keeping up
+    const fillPct = stock / STORAGE_CAP;
+    if (fillPct >= ORE_LOW_PCT) continue; // Miners keeping up or storage has enough
 
-    const quantityNeeded = Math.min(ORE_TARGET_STOCK - stock, 50); // Cap per order
+    const targetQty = Math.floor(STORAGE_CAP * ORE_TARGET_PCT);
+    const quantityNeeded = Math.min(targetQty - stock, 500); // Cap per order at 500
     if (quantityNeeded <= 0) continue;
 
     // Find market price for this ore
