@@ -52,11 +52,32 @@ const ROUTINE_MAX_COUNT: Partial<Record<RoutineName, number>> = {
   ship_dealer: 1,  // One dealer at a time — capital-intensive
 };
 
-/** Dynamic max count: scales explorer cap with fleet size */
-function getMaxCount(routine: RoutineName, fleetSize: number): number | undefined {
+/** Dynamic max count: scales with fleet size and supply/demand state */
+function getMaxCount(routine: RoutineName, fleetSize: number, economy?: EconomySnapshot): number | undefined {
   if (routine === "explorer") {
-    // 1 explorer for 1-5 bots, 2 for 6-11, 3 for 12+
     return fleetSize >= 12 ? 3 : fleetSize >= 6 ? 2 : 1;
+  }
+  if (routine === "crafter" && economy) {
+    // Dynamic crafter cap: flex up when ore abundant + crafted goods low
+    const oreStock = [...economy.factionStorage.entries()]
+      .filter(([id]) => id.includes("ore"))
+      .reduce((sum, [, qty]) => sum + qty, 0);
+    const craftedStock = [...economy.factionStorage.entries()]
+      .filter(([id]) => id.startsWith("refined_") || id.startsWith("component_") || id.includes("alloy") || id.includes("circuit") || id.includes("plate"))
+      .reduce((sum, [, qty]) => sum + qty, 0);
+
+    const baseCap = ROUTINE_MAX_COUNT.crafter ?? 3;
+
+    // Abundant ore (>500) + low crafted goods (<200): flex up
+    if (oreStock > 1000 && craftedStock < 100) return Math.min(baseCap + 3, fleetSize - 3); // Up to +3 extra, leave room for other roles
+    if (oreStock > 500 && craftedStock < 200) return Math.min(baseCap + 2, fleetSize - 3);
+    if (oreStock > 200 && craftedStock < 300) return Math.min(baseCap + 1, fleetSize - 3);
+
+    // Oversaturated crafted goods (>500): flex down
+    if (craftedStock > 500) return Math.max(1, baseCap - 1);
+    if (craftedStock > 1000) return 1; // Just 1 crafter to keep intermediates flowing
+
+    return baseCap;
   }
   return ROUTINE_MAX_COUNT[routine];
 }
@@ -180,7 +201,7 @@ export class ScoringBrain implements CommanderBrain {
     // Also check lastRoutine for idle bots (between cycles, b.routine is null)
     const fleetSize = candidates.length;
     for (const routine of Object.keys(ROUTINE_MAX_COUNT) as RoutineName[]) {
-      const maxCount = getMaxCount(routine, fleetSize)!;
+      const maxCount = getMaxCount(routine, fleetSize, economy)!;
       const botsOnRoutine = candidates.filter(
         (b) => b.routine === routine || (!b.routine && b.lastRoutine === routine)
       );
@@ -237,7 +258,7 @@ export class ScoringBrain implements CommanderBrain {
         if (rapidAt && (now - rapidAt) < 30_000) continue; // Skip if failed within last 30s
 
         // Early skip: routine at max count from previous cycle AND bot isn't already on it
-        const maxCount = getMaxCount(routine, fleetSize);
+        const maxCount = getMaxCount(routine, fleetSize, economy);
         if (maxCount !== undefined && bot.routine !== routine) {
           const alreadyOn = routineCounts.get(routine) ?? 0;
           if (alreadyOn >= maxCount) continue;
@@ -302,7 +323,7 @@ export class ScoringBrain implements CommanderBrain {
           continue;
         }
         // Don't lock past max count — free excess bots for Pass 2
-        const maxCount = getMaxCount(effectiveRoutine, fleetSize);
+        const maxCount = getMaxCount(effectiveRoutine, fleetSize, economy);
         if (maxCount !== undefined) {
           const alreadyLocked = cycleRoutineCounts.get(effectiveRoutine) ?? 0;
           if (alreadyLocked >= maxCount) {
@@ -331,7 +352,7 @@ export class ScoringBrain implements CommanderBrain {
     }
 
     for (const [routine, bots] of routineGroups) {
-      const maxCount = getMaxCount(routine, fleetSize);
+      const maxCount = getMaxCount(routine, fleetSize, economy);
       const lockedCount = cycleRoutineCounts.get(routine) ?? 0; // Bots locked by cooldown
       const threshold = maxCount !== undefined ? Math.min(maxCount, this.config.diversityThreshold) : this.config.diversityThreshold;
       const slotsLeft = Math.max(0, threshold - lockedCount);
@@ -383,7 +404,7 @@ export class ScoringBrain implements CommanderBrain {
       // Miner fallback: if bot has 3+ rapid-completed routines, assign miner unconditionally.
       // Miner always has work (find belt, mine, sell) and prevents idle loops.
       if (bot.rapidRoutines.size >= 3 && !bot.rapidRoutines.has("miner")) {
-        const minerMaxCount = getMaxCount("miner", fleetSize);
+        const minerMaxCount = getMaxCount("miner", fleetSize, economy);
         const minerCount = cycleRoutineCounts.get("miner") ?? 0;
         if (minerMaxCount === undefined || minerCount < minerMaxCount) {
           console.log(`[Commander] Pass2: ${bot.botId} has ${bot.rapidRoutines.size} rapid routines — fallback to miner`);
@@ -419,7 +440,7 @@ export class ScoringBrain implements CommanderBrain {
 
         // Hard cap: skip if this routine has reached its max count this cycle
         // Exception: free ship switches (alreadyOwned) bypass the cap — they're instant
-        const maxCount = getMaxCount(score.routine, fleetSize);
+        const maxCount = getMaxCount(score.routine, fleetSize, economy);
         if (maxCount !== undefined) {
           const alreadyAssigned = cycleRoutineCounts.get(score.routine) ?? 0;
           if (alreadyAssigned >= maxCount) {
