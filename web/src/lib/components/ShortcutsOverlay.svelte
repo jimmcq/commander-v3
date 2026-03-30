@@ -35,6 +35,7 @@
 			onkeydown={() => {}}
 			role="dialog"
 			aria-label="Keyboard shortcuts"
+			tabindex="-1"
 		>
 			<div class="flex items-center justify-between mb-4">
 				<h2 class="text-lg font-bold text-star-white">Keyboard Shortcuts</h2>
