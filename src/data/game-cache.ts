@@ -739,13 +739,14 @@ export class GameCache {
    */
   async hydrateFromDb(): Promise<{ markets: number; insights: number; systems: number }> {
     const now = Date.now();
+    const MAX_STALE_AGE = 24 * 60 * 60 * 1000; // Use data up to 24h old on startup
     let markets = 0, insights = 0, systems = 0;
 
     const rows = await this.db.select().from(timedCache)
       .where(eq(timedCache.tenantId, this.tenantId));
 
     for (const row of rows) {
-      if (now - row.fetchedAt > row.ttlMs) continue; // expired
+      if (now - row.fetchedAt > MAX_STALE_AGE) continue; // too old even for startup
       try {
         if (row.key.startsWith("market:")) {
           const stationId = row.key.replace("market:", "");

@@ -70,17 +70,20 @@ export async function loadBotSettings(db: DB, tenantId: string, username: string
 export type BotSkillsData = Record<string, { level: number; xp: number; xpNext: number }>;
 
 export async function saveBotSkills(db: DB, tenantId: string, username: string, skills: BotSkillsData): Promise<void> {
+  const skillsStr = typeof skills === "string" ? skills : JSON.stringify(skills);
+  const now = new Date().toISOString();
   await db.insert(botSkills)
     .values({
       tenantId,
       username,
-      skills: JSON.stringify(skills),
+      skills: skillsStr,
+      updatedAt: now,
     })
     .onConflictDoUpdate({
       target: [botSkills.tenantId, botSkills.username],
       set: {
-        skills: JSON.stringify(skills),
-        updatedAt: new Date().toISOString().replace("T", " ").slice(0, 19),
+        skills: skillsStr,
+        updatedAt: now,
       },
     });
 }
