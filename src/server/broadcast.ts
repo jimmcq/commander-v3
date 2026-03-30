@@ -270,6 +270,13 @@ export function startBroadcastLoop(deps: BroadcastDeps): () => void {
     if (tick % 5 === 0) {
       const ecoEngine = deps.commander.getEconomy();
       if (ecoEngine) {
+        // Feed cached faction storage into economy engine (persists across restarts)
+        const cachedStorage = deps.gameCache?.getFactionStorageSync();
+        if (cachedStorage && cachedStorage.length > 0) {
+          const inv = new Map<string, number>();
+          for (const item of cachedStorage) inv.set(item.itemId, item.quantity);
+          ecoEngine.updateFactionInventory(inv);
+        }
         const snap = ecoEngine.analyze(fleet);
         if (deps.workOrderManager) {
           deps.workOrderManager.syncFromEconomy(snap.workOrders);
