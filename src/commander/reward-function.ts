@@ -44,6 +44,19 @@ export interface EpisodeSignals {
   errorTerminated: boolean;
   /** Ship destroyed */
   shipLost: boolean;
+
+  // ── Contextual Balance Signals ──
+
+  /** Per-ore deposit breakdown: Map<oreId, quantity deposited this cycle> */
+  oreDeposits: Map<string, number>;
+  /** Faction storage levels at time of deposit: Map<oreId, currentStock> */
+  factionStockLevels: Map<string, number>;
+  /** Avg staleness (ms) of stations scanned this cycle — lower = data was already fresh */
+  avgScanStalenessMs: number;
+  /** Number of stations scanned that were > 30min stale */
+  staleScanCount: number;
+  /** Number of stations scanned that were < 30min old */
+  freshScanCount: number;
 }
 
 /** Computed reward with breakdown */
@@ -157,9 +170,36 @@ export function computeReward(
   breakdown.xp = xpScore;
   totalRaw += xpScore;
 
-  // Items deposited
-  const depositScore = signals.itemsDeposited * SIGNAL_WEIGHTS.itemsDeposited * (goalMultipliers.itemsDeposited ?? 1);
-  breakdown.deposits = depositScore;
+  // Items deposited (with ore balance modifier)
+  let depositScore = 0;
+  if (signals.oreDeposits.size > 0 && signals.factionStockLevels.size > 0) {
+    // Per-ore scoring: reward scarce ores, penalize oversupplied ones
+    // Faction storage max per item = 100,000 (tier 1 lockbox)
+    const STORAGE_MAX = 100_000;
+    for (const [oreId, qty] of signals.oreDeposits) {
+      const stock = signals.factionStockLevels.get(oreId) ?? 0;
+      const fillPct = stock / STORAGE_MAX;
+      let modifier: number;
+      if (fillPct >= 0.90) {
+        modifier = -0.5;  // >90% full: penalize (we're overflowing)
+      } else if (fillPct >= 0.75) {
+        modifier = 0.25;  // 75-90%: minimal reward
+      } else if (fillPct >= 0.50) {
+        modifier = 0.5;   // 50-75%: half reward
+      } else if (fillPct >= 0.10) {
+        modifier = 1.0;   // 10-50%: normal reward
+      } else {
+        modifier = 3.0;   // <10%: triple reward (scarce, high demand)
+      }
+      depositScore += qty * SIGNAL_WEIGHTS.itemsDeposited * modifier * (goalMultipliers.itemsDeposited ?? 1);
+    }
+    breakdown.deposits = depositScore;
+    breakdown.oreBalance = depositScore; // Track balance impact separately
+  } else {
+    // Fallback: flat deposit scoring when no stock data available
+    depositScore = signals.itemsDeposited * SIGNAL_WEIGHTS.itemsDeposited * (goalMultipliers.itemsDeposited ?? 1);
+    breakdown.deposits = depositScore;
+  }
   totalRaw += depositScore;
 
   // Strategic items (weighted individually by their boost score)
@@ -182,8 +222,18 @@ export function computeReward(
   breakdown.explored = exploreScore;
   totalRaw += exploreScore;
 
-  // Market intel
-  const scanScore = signals.stationsScanned * SIGNAL_WEIGHTS.stationsScanned * (goalMultipliers.stationsScanned ?? 1);
+  // Market intel (with scan freshness modifier)
+  let scanScore: number;
+  if (signals.staleScanCount > 0 || signals.freshScanCount > 0) {
+    // Stale scans (>30min old) are worth much more than refreshing fresh data
+    const staleValue = signals.staleScanCount * 16.0 * (goalMultipliers.stationsScanned ?? 1);
+    const freshValue = signals.freshScanCount * 2.0 * (goalMultipliers.stationsScanned ?? 1);
+    scanScore = staleValue + freshValue;
+    breakdown.staleScanBonus = staleValue;
+    breakdown.freshScanValue = freshValue;
+  } else {
+    scanScore = signals.stationsScanned * SIGNAL_WEIGHTS.stationsScanned * (goalMultipliers.stationsScanned ?? 1);
+  }
   breakdown.scanned = scanScore;
   totalRaw += scanScore;
 
@@ -292,5 +342,10 @@ export function emptySignals(): EpisodeSignals {
     stuckTimeSec: 0,
     errorTerminated: false,
     shipLost: false,
+    oreDeposits: new Map(),
+    factionStockLevels: new Map(),
+    avgScanStalenessMs: 0,
+    staleScanCount: 0,
+    freshScanCount: 0,
   };
 }

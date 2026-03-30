@@ -656,6 +656,8 @@ async function pollFactionState(deps: BroadcastDeps): Promise<void> {
       // Update cache
       cachedFactionStorage = storageItems;
       cachedFactionCredits = factionCredits;
+      // Feed into game cache for reward scoring (ore balance)
+      deps.gameCache?.setFactionStorageSync(storageItems);
     } else {
       // Use cached data if no docked bot available
       storageItems = cachedFactionStorage ?? [];

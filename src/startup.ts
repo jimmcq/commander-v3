@@ -324,7 +324,7 @@ export async function startup(config: AppConfig): Promise<AppServices> {
   const commander = new Commander(commanderConfig, commanderDeps, brain);
 
   // Wire event bus → commander reward signals (per-bot accumulators for bandit learning)
-  eventBus.on("deposit", (e) => commander.addBotSignal(e.botId, "deposited", e.quantity));
+  eventBus.on("deposit", (e) => commander.addBotSignal(e.botId, "deposited", e.quantity, e.itemId));
   eventBus.on("mine", (e) => commander.addBotSignal(e.botId, "mined", e.quantity));
   eventBus.on("craft", (e) => commander.addBotSignal(e.botId, "crafted", e.outputQuantity));
   eventBus.on("trade_sell", (e) => commander.addBotSignal(e.botId, "deposited", e.quantity)); // faction sell = deposit

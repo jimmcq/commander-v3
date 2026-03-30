@@ -105,7 +105,11 @@ export class Commander {
   /** Bandit reward tracking: per-bot snapshot at last eval (for computing deltas) */
   private _botSnapshots = new Map<string, { credits: number; routine: string | null; role: string | null; startTick: number; warm?: boolean }>();
   /** Per-bot signal accumulators — reset each eval cycle, fed by events */
-  private _botSignals = new Map<string, { deposited: number; crafted: number; mined: number; xp: number; scanned: number; missions: number }>();
+  private _botSignals = new Map<string, {
+    deposited: number; crafted: number; mined: number; xp: number; scanned: number; missions: number;
+    oreDeposits: Map<string, number>;
+    staleScanCount: number; freshScanCount: number;
+  }>();
   /** Strategic trigger engine — decides when to call LLM */
   private triggerEngine = new StrategicTriggerEngine();
   /** Last strategic trigger (for dashboard) */
@@ -197,15 +201,33 @@ export class Commander {
   }
 
   /** Accumulate a reward signal for a bot (called by event handlers) */
-  addBotSignal(botId: string, signal: "deposited" | "crafted" | "mined" | "xp" | "scanned" | "missions", amount: number): void {
+  addBotSignal(botId: string, signal: "deposited" | "crafted" | "mined" | "xp" | "scanned" | "missions", amount: number, itemId?: string): void {
     let s = this._botSignals.get(botId);
-    if (!s) { s = { deposited: 0, crafted: 0, mined: 0, xp: 0, scanned: 0, missions: 0 }; this._botSignals.set(botId, s); }
+    if (!s) {
+      s = { deposited: 0, crafted: 0, mined: 0, xp: 0, scanned: 0, missions: 0, oreDeposits: new Map(), staleScanCount: 0, freshScanCount: 0 };
+      this._botSignals.set(botId, s);
+    }
     s[signal] += amount;
+    // Track per-ore deposits for balance scoring
+    if (signal === "deposited" && itemId) {
+      s.oreDeposits.set(itemId, (s.oreDeposits.get(itemId) ?? 0) + amount);
+    }
+  }
+
+  /** Track scan freshness for a bot */
+  addScanFreshness(botId: string, stale: boolean): void {
+    let s = this._botSignals.get(botId);
+    if (!s) {
+      s = { deposited: 0, crafted: 0, mined: 0, xp: 0, scanned: 0, missions: 0, oreDeposits: new Map(), staleScanCount: 0, freshScanCount: 0 };
+      this._botSignals.set(botId, s);
+    }
+    if (stale) s.staleScanCount++; else s.freshScanCount++;
   }
 
   /** Get and reset accumulated signals for a bot */
-  private drainBotSignals(botId: string): { deposited: number; crafted: number; mined: number; xp: number; scanned: number; missions: number } {
-    const s = this._botSignals.get(botId) ?? { deposited: 0, crafted: 0, mined: 0, xp: 0, scanned: 0, missions: 0 };
+  private drainBotSignals(botId: string) {
+    const empty = { deposited: 0, crafted: 0, mined: 0, xp: 0, scanned: 0, missions: 0, oreDeposits: new Map<string, number>(), staleScanCount: 0, freshScanCount: 0 };
+    const s = this._botSignals.get(botId) ?? empty;
     this._botSignals.delete(botId);
     return s;
   }
@@ -1477,6 +1499,19 @@ export class Commander {
         signals.xpGained = botSigs.xp;
         signals.stationsScanned = botSigs.scanned;
         signals.missionsCompleted = botSigs.missions;
+        signals.oreDeposits = botSigs.oreDeposits;
+        signals.staleScanCount = botSigs.staleScanCount;
+        signals.freshScanCount = botSigs.freshScanCount;
+
+        // Get faction stock levels for ore-balance scoring
+        try {
+          const factionStorage = this.deps.cache?.getFactionStorageSync?.();
+          if (factionStorage) {
+            for (const item of factionStorage) {
+              signals.factionStockLevels.set(item.itemId, item.quantity);
+            }
+          }
+        } catch { /* non-critical */ }
 
         // Compute composite reward
         const { reward, breakdown } = computeReward(signals, durationSec, this.goals);

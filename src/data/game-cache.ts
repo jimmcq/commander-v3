@@ -768,6 +768,17 @@ export class GameCache {
     return { markets, insights, systems };
   }
 
+  // ── Faction Storage (in-memory mirror for reward scoring) ──
+  private _factionStorage: Array<{ itemId: string; itemName: string; quantity: number }> = [];
+
+  setFactionStorageSync(items: Array<{ itemId: string; itemName: string; quantity: number }>): void {
+    this._factionStorage = items;
+  }
+
+  getFactionStorageSync(): Array<{ itemId: string; itemName: string; quantity: number }> {
+    return this._factionStorage;
+  }
+
   /** Load persisted faction state (survives restarts) */
   async getPersistedFactionState(): Promise<any | null> {
     const cached = await this.getTimed("faction_state");
