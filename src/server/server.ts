@@ -31,6 +31,8 @@ export interface ServerOptions {
   requireAuth?: boolean;
   /** Bot manager for public stats */
   botManager?: { getAllBots(): Array<{ username: string; status: string; routine: string | null; role?: string }> };
+  /** Work order manager for QM dashboard */
+  workOrderManager?: import("../commander/work-order-manager").WorkOrderManager;
   /** Start time for uptime calculation */
   startTime?: number;
   onClientMessage?: (ws: ServerWebSocket<WsData>, msg: ClientMessage) => void;
@@ -95,6 +97,9 @@ export function createServer(opts: ServerOptions) {
         }
         if (url.pathname === "/api/public/learning") {
           return handlePublicLearning(opts);
+        }
+        if (url.pathname === "/api/public/work-orders") {
+          return handlePublicWorkOrders(opts);
         }
         if (url.pathname === "/api/public/training-stats" && opts.trainingLogger) {
           const stats = await opts.trainingLogger.getStats();
@@ -591,6 +596,37 @@ async function handleLogin(req: Request, opts: ServerOptions): Promise<Response>
     console.error("[Auth] Login error:", err.message);
     return Response.json({ error: "Login failed" }, { status: 500 });
   }
+}
+
+/** GET /api/public/work-orders — work order status for QM dashboard */
+async function handlePublicWorkOrders(opts: ServerOptions): Promise<Response> {
+  const wom = opts.workOrderManager;
+  if (!wom) return Response.json({ orders: [], stats: { total: 0, pending: 0, claimed: 0, inProgress: 0, completed: 0 } });
+
+  const orders = wom.getAll().map(o => ({
+    id: o.id,
+    type: o.type,
+    targetId: o.targetId,
+    description: o.description,
+    priority: o.priority,
+    reason: o.reason,
+    quantity: o.quantity ?? null,
+    stationId: o.stationId ?? null,
+    status: o.status,
+    claimedBy: o.claimedBy,
+    claimedAt: o.claimedAt,
+    createdAt: o.createdAt,
+    expiresAt: o.expiresAt,
+    ageMin: Math.round((Date.now() - o.createdAt) / 60000),
+  }));
+
+  return new Response(JSON.stringify({
+    orders,
+    stats: wom.getStats(),
+    timestamp: new Date().toISOString(),
+  }), {
+    headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+  });
 }
 
 /** GET /api/public/learning — bandit brain learning data for website display */

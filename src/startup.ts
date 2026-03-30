@@ -480,6 +480,7 @@ export async function startup(config: AppConfig): Promise<AppServices> {
     requireAuth: config._requireAuth,
     trainingLogger,
     botManager: botManager as any,
+    workOrderManager,
     startTime: Date.now(),
     onClientMessage: (ws, msg) => handleClientMessage(ws, msg, routerDeps),
     onClientConnect: (ws) => {
