@@ -498,17 +498,27 @@ export class EconomyEngine {
       });
     }
 
-    // ── Sell overstocked raw ores (3000+) ──
+    // ── Sell overstocked raw ores (only when >80% of faction storage cap) ──
+    const ORE_SELL_PCT = 0.80;
+    const ORE_KEEP_PCT = 0.50; // Sell down to 50% cap, keep a healthy reserve
     for (const [itemId, qty] of oreStock) {
-      if (qty >= 3000) {
-        orders.push({
-          type: "trade",
-          targetId: itemId,
-          description: `Sell excess ${itemId.replace(/_/g, " ")}`,
-          priority: Math.min(80, 50 + Math.round((qty - 3000) / 500)),
-          reason: `overstocked: ${qty} units`,
-          quantity: qty - 1000, // Keep 1000 reserve
-        });
+      // Don't sell ores needed for facility upgrades
+      if (facilityNeededItems.has(itemId)) continue;
+
+      const fillPct = qty / STORAGE_CAP;
+      if (fillPct >= ORE_SELL_PCT) {
+        const keepQty = Math.floor(STORAGE_CAP * ORE_KEEP_PCT);
+        const sellQty = qty - keepQty;
+        if (sellQty > 0) {
+          orders.push({
+            type: "trade",
+            targetId: itemId,
+            description: `Sell excess ${itemId.replace(/_/g, " ")} (${Math.round(fillPct * 100)}% full)`,
+            priority: Math.min(80, 50 + Math.round((fillPct - ORE_SELL_PCT) * 200)),
+            reason: `${Math.round(fillPct * 100)}% of cap (${qty.toLocaleString()} units)`,
+            quantity: sellQty,
+          });
+        }
       }
     }
 
