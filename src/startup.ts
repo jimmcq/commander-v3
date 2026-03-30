@@ -327,6 +327,7 @@ export async function startup(config: AppConfig): Promise<AppServices> {
   // Work order manager (persistent, claimable orders for the fleet)
   const { WorkOrderManager } = await import("./commander/work-order-manager");
   const workOrderManager = new WorkOrderManager(redisCache, tenantId);
+  services.workOrderManager = workOrderManager; // Make available to bot contexts
 
   eventBus.on("deposit", (e) => commander.addBotSignal(e.botId, "deposited", e.quantity, e.itemId));
   eventBus.on("mine", (e) => commander.addBotSignal(e.botId, "mined", e.quantity));

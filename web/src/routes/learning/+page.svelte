@@ -164,16 +164,19 @@
 		const b = ep.breakdown;
 		const parts: string[] = [];
 
-		const credits = Number(b.credits ?? b._rawTotal ?? 0);
-		if (credits > 0) parts.push(`earned ${Math.round(credits)} cr`);
-		else if (credits < 0) parts.push(`spent ${Math.abs(Math.round(credits))} cr (fuel/fees)`);
+		const rawCredits = Number(b._rawTotal ?? b.credits ?? 0);
+		const perMinute = Number(b._perMinute ?? 0);
+		if (rawCredits > 0) parts.push(`earned ${Math.round(rawCredits).toLocaleString()} cr (${perMinute.toFixed(1)}/min)`);
+		else if (rawCredits < 0) parts.push(`spent ${Math.abs(Math.round(rawCredits)).toLocaleString()} cr (fuel/fees)`);
 
 		const deposits = Number(b.deposits ?? 0);
-		if (deposits > 0) parts.push(`deposited items (+${deposits.toFixed(0)})`);
+		const oreBalance = Number(b.oreBalance ?? 0);
+		if (deposits > 0 && oreBalance >= 0) parts.push(`deposited items (reward: +${deposits.toFixed(0)}, balance OK)`);
+		else if (deposits > 0 && oreBalance < 0) parts.push(`deposited oversupplied ore (penalty: ${oreBalance.toFixed(0)})`);
 		else if (deposits < 0) parts.push(`ore oversupplied (${deposits.toFixed(0)})`);
 
 		const crafted = Number(b.crafted ?? 0);
-		if (crafted > 0) parts.push(`crafted items (+${crafted.toFixed(0)})`);
+		if (crafted > 0) parts.push(`crafted ${Math.round(crafted / 5)} items (+${crafted.toFixed(0)})`);
 
 		const scanned = Number(b.staleScanBonus ?? b.scanned ?? 0);
 		if (scanned > 0) parts.push(`scanned stale markets (+${scanned.toFixed(0)})`);
