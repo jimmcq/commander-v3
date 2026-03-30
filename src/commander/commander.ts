@@ -103,7 +103,7 @@ export class Commander {
   /** Role pool sizing config */
   private _poolConfig: RolePoolConfig[] = DEFAULT_POOL_CONFIG;
   /** Bandit reward tracking: per-bot snapshot at last eval (for computing deltas) */
-  private _botSnapshots = new Map<string, { credits: number; routine: string | null; role: string | null; startTick: number }>();
+  private _botSnapshots = new Map<string, { credits: number; routine: string | null; role: string | null; startTick: number; warm?: boolean }>();
   /** Strategic trigger engine — decides when to call LLM */
   private triggerEngine = new StrategicTriggerEngine();
   /** Last strategic trigger (for dashboard) */
@@ -1443,17 +1443,14 @@ export class Commander {
 
       if (prev && prev.routine && prev.routine !== bot.routine) {
         // Routine changed — the previous routine completed a cycle
-        const durationSec = Math.max(this.tick - prev.startTick, 30);
-        const creditDelta = (bot.credits ?? 0) - (prev.credits ?? 0);
-
-        // Skip absurd deltas (from restarts, snapshot mismatches, or faction transfers)
-        // Normal per-minute delta rarely exceeds ±500 cr/min
-        const perMinute = creditDelta / Math.max(durationSec / 60, 1);
-        if (Math.abs(perMinute) > 5000) {
-          // Likely a restart artifact or faction transfer — skip this episode
-          this._botSnapshots.set(bot.botId, { credits: bot.credits ?? 0, routine: bot.routine, role: (bot as any).role, startTick: this.tick });
+        // Skip cold snapshots (first cycle after startup — credits snapshot unreliable)
+        if (!prev.warm) {
+          this._botSnapshots.set(bot.botId, { credits: bot.credits ?? 0, routine: bot.routine, role: (bot as any).role, startTick: this.tick, warm: true });
           continue;
         }
+
+        const durationSec = Math.max(this.tick - prev.startTick, 30);
+        const creditDelta = (bot.credits ?? 0) - (prev.credits ?? 0);
 
         // Build simple reward signals from credit delta
         // Full signal extraction would require event tracking — credit delta is the main signal
@@ -1475,12 +1472,13 @@ export class Commander {
         });
       }
 
-      // Update snapshot for next cycle
+      // Update snapshot for next cycle (mark as warm — valid for reward computation)
       this._botSnapshots.set(bot.botId, {
         credits: bot.credits ?? 0,
         routine: bot.routine,
         role: bot.role,
         startTick: this.tick,
+        warm: true,
       });
     }
   }
