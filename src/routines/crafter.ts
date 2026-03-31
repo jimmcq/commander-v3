@@ -81,13 +81,29 @@ export async function* crafter(ctx: BotContext): AsyncGenerator<RoutineYield, vo
 
   // ── Recipe discovery ──
   // Fetch faction storage inventory for material-aware recipe selection
+  // Use cached storage (always available, even when undocked) + live API if docked
   let factionInventory = new Map<string, number>();
+  // First: use cached faction storage from game cache (persists across restarts)
+  const cachedStorage = ctx.cache.getFactionStorageSync();
+  for (const item of cachedStorage) {
+    factionInventory.set(item.itemId, (factionInventory.get(item.itemId) ?? 0) + item.quantity);
+  }
+  // Then: try live API if docked (more accurate but requires docking)
   try {
     const storage = await fleetViewFactionStorage(ctx);
-    for (const item of storage.items) {
-      factionInventory.set(item.itemId, (factionInventory.get(item.itemId) ?? 0) + item.quantity);
+    if (storage.items.length > 0) {
+      factionInventory.clear();
+      for (const item of storage.items) {
+        factionInventory.set(item.itemId, (factionInventory.get(item.itemId) ?? 0) + item.quantity);
+      }
     }
-  } catch { /* non-critical — will fall back to profit-only selection */ }
+  } catch { /* use cached data */ }
+
+  if (factionInventory.size === 0) {
+    yield "no faction storage data — waiting for next cycle";
+    yield typedYield("cycle_complete", { type: "cycle_complete", botId: ctx.botId, routine: "crafter" });
+    return;
+  }
 
   if (!recipeId || facilityOnlyRecipes.has(recipeId)) {
     if (facilityOnlyRecipes.has(recipeId)) recipeId = ""; // Reset blacklisted recipe
