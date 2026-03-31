@@ -597,6 +597,11 @@ export class ScoringBrain implements CommanderBrain {
 
       if (botScores.length > 0) {
         const best = botScores[0];
+        // Don't force return_home on a bot that's already home and docked
+        if (best.routine === "return_home" && bot.docked && bot.systemId === this.homeSystem) {
+          console.log(`[Commander] ${bot.botId} staying idle (fallback skipped — already home)`);
+          continue;
+        }
         console.log(`[Commander] Fallback: forcing ${bot.botId} → ${best.routine} (score ${best.finalScore.toFixed(0)})`);
         assignments.push({
           botId: bot.botId,

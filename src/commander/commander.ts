@@ -1493,6 +1493,12 @@ export class Commander {
 
       if (prev && prev.routine && prev.routine !== bot.routine) {
         // Routine changed — the previous routine completed a cycle
+        // Skip return_home episodes (no productive work, pollutes learning data)
+        if (prev.routine === "return_home" || bot.routine === "return_home") {
+          this._botSnapshots.set(bot.botId, { credits: bot.credits ?? 0, routine: bot.routine, role: (bot as any).role, startTick: this.tick, warm: true });
+          continue;
+        }
+
         // Skip cold snapshots (first cycle after startup — credits snapshot unreliable)
         if (!prev.warm) {
           this._botSnapshots.set(bot.botId, { credits: bot.credits ?? 0, routine: bot.routine, role: (bot as any).role, startTick: this.tick, warm: true });
