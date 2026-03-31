@@ -22,6 +22,7 @@
 	let showNotifications = $state(false);
 	let showShortcuts = $state(false);
 	let showPalette = $state(false);
+	let showMobileNav = $state(false);
 
 	// Toast notifications (auto-dismiss after 5s)
 	let toasts = $state<Array<{ id: string; level: string; title: string; message: string; timestamp: number }>>([]);
@@ -58,6 +59,12 @@
 		{ href: "/quartermaster", label: "QM", key: "9" },
 		{ href: "/manual", label: "Manual", key: "0" },
 	];
+
+	// Close mobile nav on route change
+	$effect(() => {
+		$page.url.pathname;
+		showMobileNav = false;
+	});
 
 	function isActive(href: string, pathname: string): boolean {
 		if (href === "/") return pathname === "/";
@@ -138,13 +145,30 @@
 	class:mt-8={$connectionState !== "connected"}
 >
 	<div class="mx-auto flex h-12 max-w-[1920px] items-center px-4 gap-1">
+		<!-- Hamburger (mobile only) -->
+		<button
+			class="md:hidden flex items-center justify-center w-8 h-8 text-chrome-silver hover:text-star-white transition-colors mr-2"
+			onclick={() => (showMobileNav = !showMobileNav)}
+			aria-label="Toggle navigation"
+		>
+			{#if showMobileNav}
+				<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+				</svg>
+			{:else}
+				<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
+				</svg>
+			{/if}
+		</button>
+
 		<!-- Logo -->
 		<a href="/" class="flex items-center gap-2 mr-4 shrink-0">
 			<span class="text-lg font-bold text-plasma-cyan">&#9889; COMMANDER</span>
 		</a>
 
-		<!-- Nav links -->
-		<div class="flex items-center gap-0.5">
+		<!-- Nav links (desktop) -->
+		<div class="hidden md:flex items-center gap-0.5">
 			{#each navItems as item}
 				<a
 					href={item.href}
@@ -239,6 +263,36 @@
 			</button>
 		{/if}
 	</div>
+
+	<!-- Mobile nav dropdown -->
+	{#if showMobileNav}
+		<div class="md:hidden border-t border-hull-grey/30 bg-deep-void/98 px-4 py-2 flex flex-col gap-1">
+			{#each navItems as item}
+				<a
+					href={item.href}
+					class="px-3 py-2 text-sm font-medium rounded-md transition-colors {isActive(
+						item.href,
+						$page.url.pathname
+					)
+						? 'bg-nebula-blue text-plasma-cyan'
+						: 'text-chrome-silver hover:text-star-white hover:bg-nebula-blue/50'}"
+				>
+					{item.label}
+				</a>
+			{/each}
+			<a
+				href="/settings"
+				class="px-3 py-2 text-sm font-medium rounded-md transition-colors {isActive(
+					'/settings',
+					$page.url.pathname
+				)
+					? 'bg-nebula-blue text-plasma-cyan'
+					: 'text-chrome-silver hover:text-star-white hover:bg-nebula-blue/50'}"
+			>
+				Settings
+			</a>
+		</div>
+	{/if}
 </nav>
 
 <!-- Notification drawer -->

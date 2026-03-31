@@ -153,7 +153,12 @@ export class TrainingLogger {
       createdAt: now,
     }));
 
-    await this.db.insert(marketHistory).values(rows);
+    try {
+      await this.db.insert(marketHistory).values(rows);
+    } catch (err) {
+      // Non-critical — market history is supplementary data
+      console.warn(`[TrainingLogger] logMarketPrices failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
   }
 
   async logCommanderDecision(params: {

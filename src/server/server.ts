@@ -113,12 +113,15 @@ export function createServer(opts: ServerOptions) {
           }), { headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" } });
         }
 
-        // Auth endpoints are always public (login/register)
+        // Auth endpoints are always public (login/register/refresh)
         if (url.pathname === "/api/login" && req.method === "POST") {
           return handleLogin(req, opts);
         }
         if (url.pathname === "/api/register" && req.method === "POST") {
           return handleRegister(req, opts);
+        }
+        if (url.pathname === "/api/refresh-token" && req.method === "POST") {
+          return handleRefreshToken(req, opts);
         }
 
         // Authenticate all other REST API routes if required
@@ -604,6 +607,36 @@ async function handleLogin(req: Request, opts: ServerOptions): Promise<Response>
   } catch (err: any) {
     console.error("[Auth] Login error:", err.message);
     return Response.json({ error: "Login failed" }, { status: 500 });
+  }
+}
+
+/** POST /api/refresh-token — exchange a valid JWT for a fresh one */
+async function handleRefreshToken(req: Request, opts: ServerOptions): Promise<Response> {
+  try {
+    const authHeader = req.headers.get("Authorization");
+    const token = extractToken(authHeader);
+    if (!token) {
+      return Response.json({ error: "Token required" }, { status: 401 });
+    }
+
+    const payload = await verifyToken(token);
+    if (!payload) {
+      return Response.json({ error: "Invalid or expired token" }, { status: 401 });
+    }
+
+    // Issue a fresh token with the same claims but new expiry
+    const newToken = await createToken({
+      sub: payload.sub,
+      username: payload.username,
+      role: payload.role,
+      tier: payload.tier,
+      tenantId: payload.tenantId ?? opts.tenantId,
+    });
+
+    return Response.json({ token: newToken });
+  } catch (err: any) {
+    console.error("[Auth] Refresh token error:", err.message);
+    return Response.json({ error: "Token refresh failed" }, { status: 500 });
   }
 }
 
