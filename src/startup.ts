@@ -184,7 +184,8 @@ export async function startup(config: AppConfig): Promise<AppServices> {
     if (savedFleetSettings.homeSystem) botManager.fleetConfig.homeSystem = savedFleetSettings.homeSystem;
     if (savedFleetSettings.homeBase) botManager.fleetConfig.homeBase = savedFleetSettings.homeBase;
     if (savedFleetSettings.defaultStorageMode) botManager.fleetConfig.defaultStorageMode = savedFleetSettings.defaultStorageMode as "sell" | "deposit" | "faction_deposit";
-    console.log(`[Config] Loaded fleet settings: tax=${savedFleetSettings.factionTaxPercent}%, minCredits=${savedFleetSettings.minBotCredits}, maxCredits=${savedFleetSettings.maxBotCredits}, home=${savedFleetSettings.homeSystem || 'auto'}/${savedFleetSettings.homeBase || 'auto'}, storage=${savedFleetSettings.defaultStorageMode || 'config'}`);
+    if (savedFleetSettings.facilityBuildQueue?.length) botManager.fleetConfig.facilityBuildQueue = savedFleetSettings.facilityBuildQueue;
+    console.log(`[Config] Loaded fleet settings: tax=${savedFleetSettings.factionTaxPercent}%, minCredits=${savedFleetSettings.minBotCredits}, maxCredits=${savedFleetSettings.maxBotCredits}, home=${savedFleetSettings.homeSystem || 'auto'}/${savedFleetSettings.homeBase || 'auto'}, storage=${savedFleetSettings.defaultStorageMode || 'config'}, facilityQueue=${botManager.fleetConfig.facilityBuildQueue.length} items`);
   }
 
   // Register routines
@@ -337,7 +338,15 @@ export async function startup(config: AppConfig): Promise<AppServices> {
   // Work order manager (persistent, claimable orders for the fleet)
   const { WorkOrderManager } = await import("./commander/work-order-manager");
   const workOrderManager = new WorkOrderManager(redisCache, tenantId);
-  services.workOrderManager = workOrderManager; // Make available to bot contexts
+  services.workOrderManager = workOrderManager;
+
+  // Fleet-wide shared services (nav loop detector, sell deconfliction, circuit breaker)
+  const { NavLoopDetector } = await import("./core/nav-loop-detector");
+  const { SellDeconfliction } = await import("./core/sell-deconfliction");
+  const { CircuitBreaker } = await import("./core/circuit-breaker");
+  services.navLoopDetector = new NavLoopDetector();
+  services.sellDeconfliction = new SellDeconfliction();
+  services.circuitBreaker = new CircuitBreaker();
 
   eventBus.on("deposit", (e) => commander.addBotSignal(e.botId, "deposited", e.quantity, e.itemId));
   eventBus.on("mine", (e) => commander.addBotSignal(e.botId, "mined", e.quantity));

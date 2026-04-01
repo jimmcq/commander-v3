@@ -332,12 +332,16 @@ export async function* crafter(ctx: BotContext): AsyncGenerator<RoutineYield, vo
           await ctx.refreshState();
           remaining -= batch;
 
+          // Use recipe's known output as fallback if API doesn't return item name
+          const outputItem = result.outputItem || step.output?.itemId || step.recipeId;
+          const outputQty = result.outputQuantity || batch;
+
           if (remaining > 0) {
-            yield `crafted ${batch}x ${result.outputItem} (${remaining} remaining)`;
+            yield `crafted ${batch}x ${ctx.crafting.getItemName(outputItem)} (${remaining} remaining)`;
           } else {
-            yield typedYield(`crafted ${result.outputQuantity} ${ctx.crafting.getItemName(result.outputItem)}`, {
+            yield typedYield(`crafted ${outputQty} ${ctx.crafting.getItemName(outputItem)}`, {
               type: "craft", botId: ctx.botId, recipeId: step.recipeId,
-              outputItem: result.outputItem, outputQuantity: result.outputQuantity,
+              outputItem, outputQuantity: outputQty,
             });
             const xpEntries = Object.entries(result.xpGained);
             if (xpEntries.length > 0) {

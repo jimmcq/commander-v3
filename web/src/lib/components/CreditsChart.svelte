@@ -1,24 +1,29 @@
 <script lang="ts">
 	/**
-	 * Credits Over Time - line chart.
-	 * Two modes:
-	 *   1. Fleet mode (no data prop): fetches history from REST API with time range filters
-	 *   2. Simple mode (data prop): renders provided data directly (used in bot detail)
+	 * Credits Over Time - line chart with 3 series:
+	 *   1. Bot Credits (sum of all bot wallets)
+	 *   2. Faction Treasury (faction-wide credits)
+	 *   3. Total (bot + faction)
 	 */
 	import Chart from "./Chart.svelte";
 	import { fleetStats, factionState, getAuthHeaders } from "$stores/websocket";
 
 	type Range = "1h" | "1d" | "1w" | "1m";
 
+	interface DataPoint {
+		time: string;
+		credits: number;
+		factionCredits?: number;
+	}
+
 	interface Props {
-		data?: Array<{ time: string; credits: number }>;
+		data?: DataPoint[];
 	}
 
 	let { data }: Props = $props();
 
-	// Fleet mode state (only used when no data prop)
 	let range = $state<Range>("1h");
-	let history = $state<Array<{ time: string; credits: number }>>([]);
+	let history = $state<DataPoint[]>([]);
 	let lastAppend = 0;
 
 	const isFleetMode = $derived(data === undefined);
@@ -35,20 +40,23 @@
 		}
 	}
 
-	// Fetch on mount and when range changes (fleet mode only)
 	$effect(() => {
 		if (isFleetMode) {
 			fetchHistory(range);
 		}
 	});
 
-	// Append live data from WebSocket every 30s (fleet mode only)
+	// Append live data from WebSocket every 30s
 	$effect(() => {
 		if (isFleetMode && $fleetStats && $fleetStats.totalCredits > 0) {
 			const now = Date.now();
 			if (now - lastAppend >= 30_000) {
 				lastAppend = now;
-				history = [...history, { time: new Date().toISOString(), credits: $fleetStats.totalCredits }];
+				history = [...history, {
+					time: new Date().toISOString(),
+					credits: $fleetStats.totalCredits,
+					factionCredits: $factionState?.credits ?? 0,
+				}];
 			}
 		}
 	});
@@ -72,8 +80,12 @@
 			if (!isFleetMode || range === "1h" || range === "1d") return d.time.slice(11, 16);
 			return d.time.slice(5, 10) + " " + d.time.slice(11, 16);
 		});
-		const values = chartData.map((d) => d.credits);
-		const factionCredits = $factionState?.credits ?? 0;
+		const botValues = chartData.map((d) => d.credits);
+		const factionValues = chartData.map((d) => d.factionCredits ?? 0);
+		const totalValues = chartData.map((d, i) => d.credits + (d.factionCredits ?? 0));
+
+		// Only show faction/total if we have faction data
+		const hasFaction = factionValues.some(v => v > 0);
 
 		return {
 			tooltip: {
@@ -85,7 +97,7 @@
 					const pp = Array.isArray(params) ? params : [params];
 					let html = `<b>${pp[0]?.axisValue ?? ""}</b>`;
 					for (const p of pp) {
-						html += `<br/><span style="color:${p.color}">${p.seriesName}:</span> ${p.value?.toLocaleString() ?? "---"} cr`;
+						html += `<br/><span style="color:${p.color}">${p.seriesName}:</span> ${(p.value ?? 0).toLocaleString()} cr`;
 					}
 					return html;
 				},
@@ -104,20 +116,24 @@
 				axisLabel: {
 					color: "#a8c5d6",
 					fontSize: 10,
-					formatter: (v: number) => (v >= 1000 ? `${(v / 1000).toFixed(0)}k` : `${v}`),
+					formatter: (v: number) => {
+						if (v >= 1_000_000) return `${(v / 1_000_000).toFixed(1)}M`;
+						if (v >= 1000) return `${(v / 1000).toFixed(0)}k`;
+						return `${v}`;
+					},
 				},
 			},
 			legend: {
-				data: ["Bot Credits", "Faction Treasury"],
+				data: hasFaction ? ["Bot Credits", "Faction Treasury", "Total"] : ["Bot Credits"],
 				textStyle: { color: "#a8c5d6", fontSize: 10 },
 				top: 0,
-				right: 60,
+				right: 10,
 			},
 			series: [
 				{
 					name: "Bot Credits",
 					type: "line",
-					data: values,
+					data: botValues,
 					smooth: true,
 					showSymbol: false,
 					lineStyle: { color: "#00d4ff", width: 2 },
@@ -126,22 +142,42 @@
 							type: "linear",
 							x: 0, y: 0, x2: 0, y2: 1,
 							colorStops: [
-								{ offset: 0, color: "rgba(0, 212, 255, 0.15)" },
-								{ offset: 1, color: "rgba(0, 212, 255, 0.02)" },
+								{ offset: 0, color: "rgba(0, 212, 255, 0.1)" },
+								{ offset: 1, color: "rgba(0, 212, 255, 0.01)" },
 							],
 						},
 					},
 				},
-				...(factionCredits > 0 ? [{
-					name: "Faction Treasury",
-					type: "line",
-					data: values.map(() => factionCredits),
-					smooth: false,
-					showSymbol: false,
-					lineStyle: { color: "#f59e0b", width: 1.5, type: "dashed" as const },
-				}] : []),
+				...(hasFaction ? [
+					{
+						name: "Faction Treasury",
+						type: "line",
+						data: factionValues,
+						smooth: true,
+						showSymbol: false,
+						lineStyle: { color: "#f59e0b", width: 2 },
+						areaStyle: {
+							color: {
+								type: "linear",
+								x: 0, y: 0, x2: 0, y2: 1,
+								colorStops: [
+									{ offset: 0, color: "rgba(245, 158, 11, 0.1)" },
+									{ offset: 1, color: "rgba(245, 158, 11, 0.01)" },
+								],
+							},
+						},
+					},
+					{
+						name: "Total",
+						type: "line",
+						data: totalValues,
+						smooth: true,
+						showSymbol: false,
+						lineStyle: { color: "#22c55e", width: 2, type: "dashed" as const },
+					},
+				] : []),
 			],
-			grid: { left: 8, right: 8, top: 20, bottom: 8 },
+			grid: { left: 8, right: 8, top: 24, bottom: 8 },
 		} as any;
 	});
 </script>

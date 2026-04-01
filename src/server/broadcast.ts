@@ -227,13 +227,14 @@ export function startBroadcastLoop(deps: BroadcastDeps): () => void {
       }
     }
 
-    // Credit history to DB (every 30s)
+    // Credit history to DB (every 30s) — includes bot + faction credits
     if (tick % cfg.creditHistoryIntervalTicks === 0) {
       await deps.db.insert(creditHistory)
         .values({
           tenantId: deps.tenantId,
           timestamp: Date.now(),
           totalCredits: fleet.totalCredits,
+          factionCredits: cachedFactionCredits ?? 0,
           activeBots: fleet.activeBots,
         });
     }

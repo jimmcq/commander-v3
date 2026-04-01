@@ -540,6 +540,7 @@ export class EconomyEngine {
         fuel_cell: 200,           // Keep 200, sell excess
         fuel_cell_premium: 50,    // Keep 50 premium
         repair_kit: 100,          // Keep 100 repair kits
+        purified_water: 500,      // Bio facilities consume water each cycle (v0.257.0)
       };
       if (itemId in CONSUMABLE_RESERVES) {
         const reserve = CONSUMABLE_RESERVES[itemId];

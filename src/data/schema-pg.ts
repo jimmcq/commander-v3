@@ -197,6 +197,7 @@ export const creditHistory = pgTable("credit_history", {
   tenantId: text("tenant_id").notNull(),
   timestamp: bigint("timestamp", { mode: "number" }).notNull(),
   totalCredits: integer("total_credits").notNull(),
+  factionCredits: integer("faction_credits").default(0),
   activeBots: integer("active_bots").notNull(),
 }, (table) => [
   index("idx_credit_tenant").on(table.tenantId),

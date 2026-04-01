@@ -200,6 +200,10 @@ export interface CatalogItem {
   powerCost?: number;
   /** Module-specific: Slot type (weapon, defense, utility) */
   slotType?: string;
+  /** Mining: equipment type required to extract this resource (v0.258.0+) */
+  extractedBy?: string;
+  /** Mining: power of this mining equipment */
+  miningPower?: number;
 }
 
 export interface ShipClass {

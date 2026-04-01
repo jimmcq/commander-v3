@@ -785,6 +785,16 @@ export async function* trader(ctx: BotContext): AsyncGenerator<RoutineYield, voi
 
     const qty = ctx.cargo.getItemQuantity(ctx.ship, item);
     if (qty > 0) {
+      // Fleet sell deconfliction — warn if other bots recently sold same item here
+      const sellConflict = ctx.sellDeconfliction?.checkConflict(ctx.botId, sellStation, item);
+      if (sellConflict) {
+        yield `sell warning: ${sellConflict.warning}`;
+        // If market is flooded (3+ fleet sells), try to find alternative
+        if (sellConflict.recentSells >= 3) {
+          yield "market flooded by fleet — selling anyway but price may be depressed";
+        }
+      }
+
       // Check if sell price is profitable vs what we paid
       const buyOrdersAtSell = sellMarketOrders.filter(
         (m) => m.type === "buy" && m.itemId === item && m.quantity > 0
@@ -1098,8 +1108,19 @@ async function* insightGatedArbitrageTrip(
   });
 
   if (gatedRoutes.length === 0) {
-    yield "arbitrage: no insight-gated routes available";
-    return;
+    // Fallback: try cross-empire arbitrage (higher margins, longer travel)
+    const crossEmpireRoutes = ctx.market.findCrossEmpireArbitrage(
+      cachedStationIds, ctx.player.currentSystem, ctx.cargo.freeSpace(ctx.ship),
+    ).filter((r) => !isOre(r.itemId) && !blacklistedItems.has(r.itemId));
+
+    if (crossEmpireRoutes.length > 0) {
+      yield `cross-empire arbitrage: ${crossEmpireRoutes.length} route(s) found`;
+      // Use cross-empire routes as gatedRoutes
+      gatedRoutes.push(...crossEmpireRoutes);
+    } else {
+      yield "arbitrage: no routes available (local or cross-empire)";
+      return;
+    }
   }
 
   // Pick first unclaimed route (prevents fleet stampede — multiple traders racing same route)

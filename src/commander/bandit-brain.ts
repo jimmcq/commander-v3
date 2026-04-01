@@ -68,7 +68,7 @@ export function extractContext(
     (bot.speed ?? 3) / 10,                                         // 4: speed
     Math.log10(Math.max(1, bot.cargoCapacity ?? 70)) / 3,          // 5: cargo_capacity_log
     mods.some(m => m.includes("mining_laser")) ? 1 : 0,            // 6: has_mining_laser
-    mods.some(m => m.includes("pulse_laser") || m.includes("autocannon") || m.includes("railgun")) ? 1 : 0, // 7: has_weapon
+    mods.some(m => m.includes("pulse_laser") || m.includes("autocannon") || m.includes("railgun") || m.includes("focused_beam") || m.includes("mass_driver")) ? 1 : 0, // 7: has_weapon
     mods.some(m => m.includes("ice_harvester")) ? 1 : 0,           // 8: has_ice_harvester
     mods.some(m => m.includes("gas_harvester")) ? 1 : 0,           // 9: has_gas_harvester
     mods.some(m => m.includes("cargo_expander")) ? 1 : 0,          // 10: has_cargo_expander

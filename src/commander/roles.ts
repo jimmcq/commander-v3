@@ -76,7 +76,7 @@ export const ROLE_MODULES: Record<BotRole | "default", string[]> = {
   trader:         ["cargo_expander", "cargo_expander", "cargo_expander", "cargo_expander", "shield_booster"],
   crafter:        ["mining_laser", "cargo_expander", "cargo_expander"],
   quartermaster:  ["cargo_expander", "cargo_expander"],
-  hunter:         ["autocannon", "autocannon", "shield_booster", "armor_plate"],
+  hunter:         ["focused_beam", "railgun", "shield_booster", "armor_plate"],
   mission_runner: ["mining_laser", "cargo_expander", "shield_booster"],
   ship_dealer:    ["cargo_expander", "cargo_expander", "cargo_expander"],
   shipwright:     ["mining_laser", "cargo_expander", "cargo_expander", "shield_booster"],
@@ -85,21 +85,22 @@ export const ROLE_MODULES: Record<BotRole | "default", string[]> = {
 
 // ── Role → Ship Progression ──
 
-/** Preferred ships per role, ordered from early-game to late-game.
- *  Commander will upgrade bots along this progression as budget allows. */
+/** Preferred ships per role, ordered from early-game to late-game (T0→T5).
+ *  Commander will upgrade bots along this progression as budget allows.
+ *  findBestUpgrade() uses the catalog directly — this is for reference/display. */
 export const ROLE_SHIPS: Record<BotRole, string[]> = {
-  ore_miner:      ["theoria", "archimedes"],
-  crystal_miner:  ["theoria", "archimedes"],
-  gas_harvester:  ["theoria", "archimedes"],
-  ice_harvester:  ["theoria", "archimedes"],
-  explorer:       ["sparrow", "viper"],
-  trader:         ["theoria", "archimedes"],
-  crafter:        ["theoria", "archimedes"],
-  quartermaster:  ["theoria", "archimedes"],
-  hunter:         ["viper", "archimedes"],
-  mission_runner: ["theoria", "archimedes"],
-  ship_dealer:    ["theoria", "archimedes"],
-  shipwright:     ["theoria", "archimedes"],
+  ore_miner:      ["theoria", "archimedes", "excavation", "deep_survey", "lithosphere", "tellurian"],
+  crystal_miner:  ["theoria", "archimedes", "excavation", "deep_survey", "lithosphere", "tellurian"],
+  gas_harvester:  ["theoria", "aether", "nebulae", "atmospheric_sampler"],
+  ice_harvester:  ["theoria", "glacius", "absolute_zero", "cryogenic_survey"],
+  explorer:       ["datum", "lemma", "solarian_foundation", "hypothesis", "perigee"],
+  trader:         ["theoria", "archimedes", "meridian_freighter", "compendium", "logistics_prime"],
+  crafter:        ["theoria", "archimedes", "excavation", "deep_survey", "lithosphere"],
+  quartermaster:  ["theoria", "archimedes", "meridian_freighter", "compendium", "logistics_prime"],
+  hunter:         ["axiom", "corollary", "theorem", "quorum", "axiomata"],
+  mission_runner: ["theoria", "archimedes", "excavation", "deep_survey"],
+  ship_dealer:    ["theoria", "archimedes", "meridian_freighter", "compendium"],
+  shipwright:     ["theoria", "archimedes", "excavation", "deep_survey"],
 };
 
 // ── Role Pool Config ──

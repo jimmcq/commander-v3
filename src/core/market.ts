@@ -292,6 +292,91 @@ export class Market {
     return totalProfit / Math.max(1, totalTicks);
   }
 
+  /**
+   * Find cross-empire arbitrage opportunities.
+   * Compares prices across different empire stations for the same item.
+   * Higher margins often exist between empires due to supply/demand asymmetry.
+   */
+  findCrossEmpireArbitrage(
+    cachedStationIds: string[],
+    fromSystemId: string,
+    cargoCapacity: number = 100,
+  ): TradeRoute[] {
+    // Group stations by empire (using system data)
+    const stationEmpires = new Map<string, string>(); // stationId → empire
+    for (const stationId of cachedStationIds) {
+      const systemId = this.galaxy.getSystemForBase(stationId);
+      if (!systemId) continue;
+      const system = this.galaxy.getSystem(systemId);
+      const empire = system?.faction ?? system?.empire ?? "unknown";
+      if (empire && empire !== "unknown") stationEmpires.set(stationId, empire);
+    }
+
+    // Find items where buy price in one empire < sell price in another
+    const allPrices = new Map<string, Map<string, MarketPrice>>();
+    for (const stationId of cachedStationIds) {
+      const prices = this.cache.getMarketPrices(stationId);
+      if (!prices) continue;
+      for (const p of prices) {
+        if (!allPrices.has(p.itemId)) allPrices.set(p.itemId, new Map());
+        allPrices.get(p.itemId)!.set(stationId, p);
+      }
+    }
+
+    const routes: TradeRoute[] = [];
+    const MIN_CROSS_EMPIRE_MARGIN = 0.15; // 15% minimum for cross-empire (higher travel cost)
+
+    for (const [itemId, stationPrices] of allPrices) {
+      const entries = Array.from(stationPrices.entries());
+
+      for (const [buyStationId, buyData] of entries) {
+        if (!buyData.buyPrice || buyData.buyPrice <= 0) continue;
+        const buyEmpire = stationEmpires.get(buyStationId);
+
+        for (const [sellStationId, sellData] of entries) {
+          if (buyStationId === sellStationId) continue;
+          if (!sellData.sellPrice || sellData.sellPrice <= 0) continue;
+
+          const sellEmpire = stationEmpires.get(sellStationId);
+          // Only cross-empire routes
+          if (buyEmpire === sellEmpire) continue;
+
+          const margin = (sellData.sellPrice - buyData.buyPrice) / buyData.buyPrice;
+          if (margin < MIN_CROSS_EMPIRE_MARGIN) continue;
+
+          const profitPerUnit = sellData.sellPrice - buyData.buyPrice;
+          const buySystemId = this.galaxy.getSystemForBase(buyStationId);
+          const sellSystemId = this.galaxy.getSystemForBase(sellStationId);
+          if (!buySystemId || !sellSystemId) continue;
+
+          const jumps = this.galaxy.getDistance(buySystemId, sellSystemId);
+          if (jumps < 0) continue;
+
+          const volume = Math.min(sellData.sellVolume || 1, buyData.buyVolume || 1, cargoCapacity);
+          const tripProfit = profitPerUnit * volume;
+          const tripTicks = jumps * 2 * 5 + 4; // Round trip estimate
+
+          routes.push({
+            itemId,
+            itemName: buyData.itemName || itemId,
+            buyStationId,
+            sellStationId,
+            buyPrice: buyData.buyPrice,
+            sellPrice: sellData.sellPrice,
+            profitPerUnit,
+            margin,
+            jumps,
+            volume,
+            tripProfitPerTick: tripProfit / Math.max(1, tripTicks),
+          });
+        }
+      }
+    }
+
+    routes.sort((a, b) => b.tripProfitPerTick - a.tripProfitPerTick);
+    return routes.slice(0, 20); // Top 20 cross-empire routes
+  }
+
   /** Get all item IDs that appear in cached market data */
   getTrackedItems(cachedStationIds: string[]): Set<string> {
     this.ensurePriceIndex();

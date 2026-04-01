@@ -94,6 +94,8 @@ export class Commander {
   private stuckDetector = new StuckDetector();
   /** Latest stuck bot list for dashboard */
   private lastStuckBots: StuckBot[] = [];
+  /** Fleet health assessment (overseer pattern) */
+  private _lastFleetHealth: import("../core/fleet-health").FleetHealth | null = null;
   /** Tracks per-bot performance outcomes for LLM feedback */
   private performanceTracker = new PerformanceTracker();
   /** Chat intelligence — reads and learns from global/faction chat */
@@ -593,7 +595,31 @@ export class Commander {
       }
     }
 
-    // Step 3.8: Pre-evaluation emergency overrides — clear cooldowns BEFORE brain runs
+    // Step 3.8: Fleet health monitoring (overseer pattern)
+    try {
+      const { evaluateFleetHealth } = await import("../core/fleet-health");
+      const botSnapshots = fleet.bots.map(b => ({
+        botId: b.botId, status: b.status, routine: b.routine,
+        fuelPct: b.fuelPct, hullPct: b.hullPct, credits: b.credits,
+        docked: b.docked, systemId: b.systemId ?? "", role: b.role ?? undefined,
+      }));
+      const health = evaluateFleetHealth(botSnapshots, {
+        minCredits: this.deps.minBotCredits ?? 0,
+        homeSystem: this.deps.homeSystem ?? "",
+      });
+      // Log critical issues
+      if (health.criticalBots.length > 0) {
+        const names = health.criticalBots.map(b => `${b.botId}(${b.score})`).join(", ");
+        console.log(`[FleetHealth] ${health.overallScore}/100 — ${health.criticalBots.length} critical: ${names}`);
+      }
+      for (const rec of health.recommendations) {
+        console.log(`[FleetHealth] Recommendation: ${rec}`);
+      }
+      // Store for dashboard
+      this._lastFleetHealth = health;
+    } catch { /* fleet health optional */ }
+
+    // Step 3.9: Pre-evaluation emergency overrides — clear cooldowns BEFORE brain runs
     this.applyEmergencyOverrides(fleet);
 
     // Step 4: Run scoring brain (ALWAYS — fast, deterministic, <50ms)
@@ -923,6 +949,10 @@ export class Commander {
           // Skill gate: skip ships the bot can't fly
           const skillCheck = checkSkillRequirements(ownedShipClass, bot.skills);
           if (!skillCheck.met) continue;
+
+          // Cargo-dependent roles: skip ships with less cargo than current (traders/QM need cargo, not speed)
+          const cargoRoles = new Set(["trader", "quartermaster", "crafter", "ore_miner", "crystal_miner"]);
+          if (cargoRoles.has(role) && ownedShipClass.cargoCapacity < currentClass.cargoCapacity) continue;
 
           const score = scoreShipForRole(ownedShipClass, role);
           if (score > bestOwnedScore + 3) { // Must be noticeably better

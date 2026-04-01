@@ -51,7 +51,7 @@ interface RoleProfile {
 const ROLE_PROFILES: Record<string, RoleProfile> = {
   miner:         { cargo: 0.4, fuel: 0.2, hull: 0.2, speed: 0.1, cpu: 0.1 },
   harvester:     { cargo: 0.4, fuel: 0.2, hull: 0.2, speed: 0.1, cpu: 0.1 },
-  trader:        { cargo: 0.5, fuel: 0.2, speed: 0.2, hull: 0.05, cpu: 0.05 },
+  trader:        { cargo: 0.6, fuel: 0.2, speed: 0.1, hull: 0.05, cpu: 0.05 },
   explorer:      { fuel: 0.4, speed: 0.3, cpu: 0.15, hull: 0.1, cargo: 0.05 },
   crafter:       { cargo: 0.3, cpu: 0.3, hull: 0.2, fuel: 0.1, speed: 0.1 },
   hunter:        { hull: 0.3, speed: 0.25, cpu: 0.2, shield: 0.15, cargo: 0.1, fuel: 0.0 },
@@ -61,14 +61,14 @@ const ROLE_PROFILES: Record<string, RoleProfile> = {
   default:       { cargo: 0.25, fuel: 0.25, hull: 0.2, speed: 0.15, cpu: 0.15 },
 };
 
-/** Normalization ranges for ship stats (approximate game maximums) */
+/** Normalization ranges for ship stats (based on T5 game maximums) */
 const STAT_MAX: Record<string, number> = {
-  cargo: 500,
-  fuel: 200,
-  hull: 500,
-  speed: 20,
-  cpu: 100,
-  shield: 300,
+  cargo: 2500,
+  fuel: 1000,
+  hull: 1200,
+  speed: 6,
+  cpu: 60,
+  shield: 500,
 };
 
 /** Extract a normalized stat (0-1) from a ShipClass */
@@ -99,26 +99,31 @@ export function scoreShipForRole(ship: ShipClass, role: string): number {
 }
 
 /**
- * Check if an upgrade is strictly better: at least 2 stats improve,
- * no stat decreases by more than 20%.
+ * Check if an upgrade is acceptable: primary stats improve significantly,
+ * allow speed regressions for industrial ships (big miners/haulers are slow).
  */
 export function isStrictUpgrade(current: ShipClass, upgrade: ShipClass): boolean {
   const stats = [
-    { cur: current.cargoCapacity, upg: upgrade.cargoCapacity },
-    { cur: current.fuel, upg: upgrade.fuel },
-    { cur: current.hull, upg: upgrade.hull },
-    { cur: current.speed, upg: upgrade.speed },
-    { cur: current.cpuCapacity, upg: upgrade.cpuCapacity },
-    { cur: current.shield, upg: upgrade.shield },
+    { stat: "cargo", cur: current.cargoCapacity, upg: upgrade.cargoCapacity },
+    { stat: "fuel", cur: current.fuel, upg: upgrade.fuel },
+    { stat: "hull", cur: current.hull, upg: upgrade.hull },
+    { stat: "speed", cur: current.speed, upg: upgrade.speed },
+    { stat: "cpu", cur: current.cpuCapacity, upg: upgrade.cpuCapacity },
+    { stat: "shield", cur: current.shield, upg: upgrade.shield },
   ];
 
   let improvements = 0;
-  for (const { cur, upg } of stats) {
+  let severeRegressions = 0;
+  for (const { stat, cur, upg } of stats) {
     if (upg > cur) improvements++;
-    // Check for significant decrease (>20%)
-    if (cur > 0 && upg < cur * 0.8) return false;
+    if (cur > 0 && upg < cur * 0.8) {
+      // Speed regression is acceptable if cargo doubles (industrial upgrade pattern)
+      if (stat === "speed" && upgrade.cargoCapacity >= current.cargoCapacity * 1.5) continue;
+      severeRegressions++;
+    }
   }
-  return improvements >= 2;
+  // Allow up to 1 severe regression if there are enough improvements
+  return improvements >= 2 && severeRegressions <= 1;
 }
 
 /**
@@ -187,9 +192,19 @@ export function describeUpgrade(current: ShipClass, upgrade: ShipClass): string 
   return diffs.join(", ");
 }
 
+/** Get the tier of a ship from its extra data (0-5) */
+export function getShipTier(ship: ShipClass): number {
+  return typeof ship.extra?.tier === "number" ? ship.extra.tier : 0;
+}
+
+/** Get the faction of a ship from its extra data */
+export function getShipFaction(ship: ShipClass): string {
+  return typeof ship.extra?.faction === "string" ? ship.extra.faction : "";
+}
+
 /**
  * Find the best affordable upgrade for a bot's role.
- * Checks skill requirements, price, and role fitness.
+ * Checks skill requirements, price, role fitness, and tier progression.
  * Returns null if no upgrade is worth buying.
  */
 export function findBestUpgrade(
@@ -203,6 +218,8 @@ export function findBestUpgrade(
   if (!current) return null;
 
   const currentScore = scoreShipForRole(current, role);
+  const currentTier = getShipTier(current);
+  const currentFaction = getShipFaction(current);
 
   let bestCandidate: ShipClass | null = null;
   let bestROI = 0;
@@ -211,6 +228,15 @@ export function findBestUpgrade(
     if (ship.id === currentClassId) continue;
     if (ship.basePrice <= 0 || ship.basePrice > maxPrice) continue;
 
+    // Only upgrade within same faction (solarian bots use solarian ships)
+    const shipFaction = getShipFaction(ship);
+    if (currentFaction && shipFaction && shipFaction !== currentFaction) continue;
+
+    // Only consider ships 1 tier above current (no skipping tiers)
+    const shipTier = getShipTier(ship);
+    if (shipTier <= currentTier) continue; // Don't downgrade or stay same tier
+    if (shipTier > currentTier + 1) continue; // Don't skip tiers
+
     // Skill gate: skip ships the bot can't fly
     if (botSkills) {
       const { met } = checkSkillRequirements(ship, botSkills);
@@ -218,10 +244,10 @@ export function findBestUpgrade(
     }
 
     const score = scoreShipForRole(ship, role);
-    // Must be at least 5 points better for the role
-    if (score <= currentScore + 5) continue;
+    // Must be at least 2 points better for the role (relaxed from 5 — tier-up is usually good)
+    if (score <= currentScore + 2) continue;
 
-    // Must be a strict upgrade (no severe stat regressions)
+    // Must be an acceptable upgrade (allows speed regression for industrial ships)
     if (!isStrictUpgrade(current, ship)) continue;
 
     const roi = calculateROI(current, ship, role);

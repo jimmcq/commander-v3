@@ -113,15 +113,17 @@ export interface FleetSettingsData {
   evaluationInterval?: number;
   reassignmentCooldown?: number;
   reassignmentThreshold?: number;
+  facilityBuildQueue?: string[];
 }
 
 export async function saveFleetSettings(db: DB, tenantId: string, settings: FleetSettingsData): Promise<void> {
   for (const [key, value] of Object.entries(settings)) {
+    const serialized = Array.isArray(value) ? JSON.stringify(value) : String(value);
     await db.insert(fleetSettings)
-      .values({ tenantId, key, value: String(value) })
+      .values({ tenantId, key, value: serialized })
       .onConflictDoUpdate({
         target: [fleetSettings.tenantId, fleetSettings.key],
-        set: { value: String(value) },
+        set: { value: serialized },
       });
   }
 }
@@ -132,6 +134,14 @@ export async function loadFleetSettings(db: DB, tenantId: string): Promise<Fleet
   if (rows.length === 0) return null;
 
   const map = new Map(rows.map(r => [r.key, r.value]));
+
+  // Parse facilityBuildQueue from JSON
+  let facilityBuildQueue: string[] | undefined;
+  const rawQueue = map.get("facilityBuildQueue");
+  if (rawQueue) {
+    try { facilityBuildQueue = JSON.parse(rawQueue); } catch { facilityBuildQueue = []; }
+  }
+
   return {
     factionTaxPercent: Number(map.get("factionTaxPercent") ?? 0),
     minBotCredits: Number(map.get("minBotCredits") ?? 0),
@@ -142,6 +152,7 @@ export async function loadFleetSettings(db: DB, tenantId: string): Promise<Fleet
     evaluationInterval: map.has("evaluationInterval") ? Number(map.get("evaluationInterval")) : undefined,
     reassignmentCooldown: map.has("reassignmentCooldown") ? Number(map.get("reassignmentCooldown")) : undefined,
     reassignmentThreshold: map.has("reassignmentThreshold") ? Number(map.get("reassignmentThreshold")) : undefined,
+    facilityBuildQueue,
   };
 }
 

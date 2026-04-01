@@ -313,6 +313,8 @@ export function handleClientMessage(
         if (!queue.includes(msg.facilityType)) {
           queue.push(msg.facilityType);
           broadcast({ type: "notification", level: "info", title: "Facility queued", message: `${msg.facilityType.replace(/_/g, " ")} — QM will build next cycle` });
+          // Persist to DB
+          saveFleetSettings(db, deps.tenantId, { facilityBuildQueue: queue } as any).catch(() => {});
         }
         break;
       }
@@ -323,6 +325,8 @@ export function handleClientMessage(
         if (idx >= 0) {
           q.splice(idx, 1);
           broadcast({ type: "notification", level: "info", title: "Build cancelled", message: msg.facilityType.replace(/_/g, " ") });
+          // Persist to DB
+          saveFleetSettings(db, deps.tenantId, { facilityBuildQueue: q } as any).catch(() => {});
         }
         break;
       }

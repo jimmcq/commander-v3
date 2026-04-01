@@ -387,6 +387,7 @@ async function* manageFactionSales(
     // Consumable reserves — keep minimum stock, only sell excess
     const CONSUMABLE_RESERVES: Record<string, number> = {
       fuel_cell: 200, fuel_cell_premium: 50, repair_kit: 100,
+      purified_water: 500, // Bio facilities consume water each cycle (v0.257.0)
     };
     if (s.itemId in CONSUMABLE_RESERVES) {
       const reserve = CONSUMABLE_RESERVES[s.itemId];
@@ -1405,10 +1406,11 @@ async function* manageFactionFacilities(
     ...userQueue.filter(f => f !== "faction_quarters"),
   ];
 
-  // Check faction treasury
+  // Check faction treasury (direct API call, not cached — upgrades need current balance)
   let factionCredits = 0;
   try {
-    factionCredits = (await fleetViewFactionStorage(ctx)).credits;
+    const factionData = await ctx.api.viewFactionStorageFull();
+    factionCredits = factionData.credits;
   } catch { /* ok */ }
 
   // List existing faction facilities at this station
@@ -1471,10 +1473,28 @@ async function* manageFactionFacilities(
       }
     }
 
-    // Require 2x cost as reserve (or just try if cost is unknown)
-    if (buildCost > 0 && factionCredits < buildCost * 2) {
-      yield `${facilityType.replace(/_/g, " ")} needs ${buildCost}cr — faction has ${factionCredits}cr`;
-      continue;
+    // Auto-fund bot wallet for build/upgrade
+    // Upgrades draw from the bot's personal credits — withdraw from faction treasury if needed
+    if (buildCost > 0) {
+      await ctx.refreshState();
+      const botCredits = ctx.player.credits ?? 0;
+      if (botCredits < buildCost) {
+        const deficit = buildCost - botCredits + 5000; // Extra buffer
+        if (factionCredits >= deficit) {
+          yield `withdrawing ${deficit}cr from faction treasury for ${facilityType.replace(/_/g, " ")} upgrade`;
+          try {
+            await ctx.api.factionWithdrawCredits(deficit);
+            await ctx.refreshState();
+            yield `withdrew ${deficit}cr — bot now has ${ctx.player.credits}cr`;
+          } catch (err) {
+            yield `treasury withdrawal failed: ${err instanceof Error ? err.message : String(err)}`;
+            continue;
+          }
+        } else {
+          yield `${facilityType.replace(/_/g, " ")} needs ${buildCost}cr — bot has ${botCredits}cr, treasury has ${factionCredits}cr (insufficient)`;
+          continue;
+        }
+      }
     }
 
     // Check if we have enough materials — try to buy missing ones from market
@@ -1538,6 +1558,61 @@ async function* manageFactionFacilities(
       return; // Max one build per cycle (rate limited)
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
+
+      // This is an upgrade, not a new build — find the predecessor facility and upgrade it
+      if (msg.includes("upgrade")) {
+        yield `${facilityType.replace(/_/g, " ")} is an upgrade — finding predecessor facility`;
+        try {
+          // The existing facility is the PREDECESSOR (e.g. faction_lockbox when upgrading to faction_warehouse)
+          // Try multiple matching strategies:
+          // 1. Exact match on the target type (in case it's a same-type upgrade)
+          // 2. Match by service type (faction_storage covers lockbox/warehouse/depot)
+          // 3. Match by category prefix (faction_ facilities)
+          const existingFacility = facilities.find(f => {
+            const fType = String(f.type ?? f.facility_type ?? "");
+            // Exact match
+            if (fType === facilityType) return true;
+            // Same service family (e.g. all faction storage facilities)
+            const svc = String(f.service ?? f.faction_service ?? "");
+            if (svc === "faction_storage" && facilityType.includes("warehouse") || facilityType.includes("depot") || facilityType.includes("stronghold") || facilityType.includes("lockbox")) return true;
+            // Same category prefix match (faction_lockbox → faction_warehouse)
+            const baseCategory = facilityType.replace(/^faction_/, "").replace(/warehouse|depot|stronghold|lockbox/, "");
+            const fBaseCategory = fType.replace(/^faction_/, "").replace(/warehouse|depot|stronghold|lockbox/, "");
+            if (baseCategory === fBaseCategory && baseCategory === "") return true; // Both are faction storage types
+            return false;
+          });
+          if (existingFacility) {
+            const fId = String(existingFacility.id ?? existingFacility.facility_id ?? "");
+            const fType = String(existingFacility.type ?? existingFacility.facility_type ?? "");
+            yield `upgrading ${fType.replace(/_/g, " ")} (id: ${fId}) → ${facilityType.replace(/_/g, " ")}`;
+            await ctx.api.factionFacilityUpgrade(fId, facilityType);
+            await ctx.refreshState();
+            const qi3 = ctx.fleetConfig.facilityBuildQueue.indexOf(facilityType);
+            if (qi3 >= 0) ctx.fleetConfig.facilityBuildQueue.splice(qi3, 1);
+            yield `upgraded to ${facilityType.replace(/_/g, " ")} successfully`;
+            for (const mat of materials) allMaterialNeeds.delete(mat.itemId);
+            ctx.cache.setFacilityMaterialNeeds(allMaterialNeeds);
+            return;
+          } else {
+            // Last resort: try upgrading with just the facility type (let the API figure out the ID)
+            yield `no predecessor found in facility list — trying direct upgrade`;
+            try {
+              await ctx.api.factionFacilityUpgrade("", facilityType);
+              await ctx.refreshState();
+              const qi4 = ctx.fleetConfig.facilityBuildQueue.indexOf(facilityType);
+              if (qi4 >= 0) ctx.fleetConfig.facilityBuildQueue.splice(qi4, 1);
+              yield `upgraded to ${facilityType.replace(/_/g, " ")} successfully`;
+              return;
+            } catch (err3) {
+              yield `direct upgrade failed: ${err3 instanceof Error ? err3.message : String(err3)}`;
+            }
+          }
+        } catch (err2) {
+          yield `upgrade failed: ${err2 instanceof Error ? err2.message : String(err2)}`;
+        }
+        continue;
+      }
+
       // Skip if already exists (another bot built it) or if we lack permissions
       if (msg.includes("already") || msg.includes("exists")) {
         existingTypes.add(facilityType);

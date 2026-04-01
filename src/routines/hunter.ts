@@ -39,6 +39,7 @@ import {
 // Note: "weapon_" prefix distinguishes weapon_laser from mining_laser
 const WEAPON_PATTERNS = [
   "weapon_", "cannon", "turret", "missile", "gun", "blaster", "railgun", "pulse_laser",
+  "focused_beam", "mass_driver", "em_disruptor",
 ];
 
 /** Estimate combat power from ship stats (hull + shield + armor) */
@@ -255,8 +256,35 @@ export async function* hunter(ctx: BotContext): AsyncGenerator<RoutineYield, voi
 
     idleCycles = 0;
 
-    // ── Engage best target (weakest first) ──
-    const target = targets[0];
+    // ── Engage best target (weakest first, with threat assessment) ──
+    let target = targets[0];
+
+    // Enhanced threat assessment — pick the best target we can safely fight
+    try {
+      const { assessThreat, shouldEngage: threatShouldEngage } = await import("../core/threat-assessment");
+      const ourStats = {
+        hull: ctx.ship.hull, shield: ctx.ship.shield,
+        armor: ctx.ship.armor ?? 0, weapons: ctx.ship.modules.filter(m => WEAPON_PATTERNS.some(p => m.moduleId.includes(p))).length,
+      };
+      // Re-sort targets by threat level (prefer targets we can beat)
+      const assessed = targets.map(t => ({
+        target: t,
+        threat: assessThreat({ hull: t.hull, maxHull: t.maxHull, shields: t.shields, maxShields: t.maxShields, armor: t.armor, classId: t.shipClass }),
+        engagement: threatShouldEngage(ourStats, assessThreat({ hull: t.hull, maxHull: t.maxHull, shields: t.shields, maxShields: t.maxShields, armor: t.armor, classId: t.shipClass })),
+      })).filter(a => a.engagement.engage).sort((a, b) => a.threat.effectiveHp - b.threat.effectiveHp);
+
+      if (assessed.length > 0) {
+        target = assessed[0].target;
+        yield `threat analysis: ${assessed[0].threat.summary} — ${assessed[0].engagement.reason} (${Math.round(assessed[0].engagement.confidence * 100)}% confidence)`;
+      } else if (targets.length > 0) {
+        yield `all ${targets.length} targets too dangerous — retreating`;
+        await interruptibleSleep(ctx, 30_000);
+        yield typedYield("cycle_complete", { type: "cycle_complete", botId: ctx.botId, routine: "hunter" });
+        continue;
+      }
+    } catch {
+      // Threat assessment failed — fall back to existing combat check
+    }
 
     // Use combat service's engagement check (hull %, security, faction)
     const check = ctx.combat.shouldEngage(ctx.ship, target, ctx.player.currentSystem);

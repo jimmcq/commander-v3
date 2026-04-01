@@ -153,6 +153,12 @@ export async function* ship_upgrade(ctx: BotContext): AsyncGenerator<RoutineYiel
       return;
     }
 
+    // Refit to latest specs (free, v0.262.0+)
+    try {
+      await ctx.api.refitShip();
+      yield "refitted to latest specs";
+    } catch { /* refit optional */ }
+
     // Fit modules + service the ship
     yield* fitModulesForRole(ctx, role);
     await refuelIfNeeded(ctx);
@@ -301,11 +307,17 @@ export async function* ship_upgrade(ctx: BotContext): AsyncGenerator<RoutineYiel
   // Step 8: Fit modules for role from faction storage
   yield* fitModulesForRole(ctx, role);
 
-  // Step 9: Service the new ship
+  // Step 9: Refit ship to latest specs (free, v0.262.0+)
+  try {
+    await ctx.api.refitShip();
+    yield "refitted to latest specs";
+  } catch { /* refit optional — game may not support it yet */ }
+
+  // Step 10: Service the new ship
   await refuelIfNeeded(ctx);
   await repairIfNeeded(ctx);
 
-  // Step 10: Auto-insure the new ship (protect investment)
+  // Step 11: Auto-insure the new ship (protect investment)
   try {
     const quote = await ctx.api.getInsuranceQuote();
     const premium = Number(quote?.premium ?? quote?.cost ?? 0);

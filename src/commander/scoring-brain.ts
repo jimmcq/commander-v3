@@ -123,7 +123,7 @@ const DEFAULT_CONFIG: ScoringConfig = {
   baseScores: {
     miner: 50,        // Reduced — ore stockpile is massive, crafters are bottleneck
     harvester: 35,    // Multi-target extraction (ice/gas), lower than miner
-    trader: 55,       // Demand-driven — supply bonus + market data quality drive assignment
+    trader: 65,       // Must compete with miner/crafter — supply chain needs sellers
     explorer: 35,     // Charts systems — info scarcity bonus drives priority dynamically
     crafter: 60,      // Reduced base — supply bonus + recipe viability drive assignment
     hunter: 0,        // Disabled — zero episodes, no wrecks, high risk for industrial fleet
@@ -243,14 +243,20 @@ export class ScoringBrain implements CommanderBrain {
     for (const bot of candidates) {
       // Specialist bots: only score allowed routines for their role
       const botRole = parseBotRole(bot.role);
+      // Specialist bots score their role's routines + universal fallbacks (miner, return_home)
+      // This prevents specialists from sitting idle when their routine is at cap
+      const roleRoutines = botRole ? getAllowedRoutines(botRole) : [];
+      const UNIVERSAL_FALLBACKS: RoutineName[] = ["miner", "return_home", "scout"];
       const botRoutines = botRole
-        ? activeRoutines.filter((r) => getAllowedRoutines(botRole).includes(r))
+        ? activeRoutines.filter((r) => roleRoutines.includes(r) || UNIVERSAL_FALLBACKS.includes(r))
         : activeRoutines; // Generalist (no role) scores all routines
       for (const routine of botRoutines) {
         // Base score: use bandit-learned weight if available, else hardcoded default
-        const banditScore = this.banditBrain
+        let banditScore = this.banditBrain
           ? this.banditBrain.getScore(botRole ?? "generalist", routine, bot, economy, goals, candidates.length, this.homeSystem)
           : null;
+        // Cap bandit scores to prevent runaway amplification (fresh bandits with high alpha can produce 15000+)
+        if (banditScore !== null) banditScore = Math.max(-100, Math.min(200, banditScore));
         const baseScore = (banditScore ?? this.config.baseScores[routine]) * weights[routine];
         if (baseScore <= 0 && routine !== "return_home") continue;
 
@@ -586,6 +592,42 @@ export class ScoringBrain implements CommanderBrain {
       }
     }
 
+    // Guarantee pass: ensure minimum 1 trader when fleet >= 5 and crafters are active
+    if (this.homeBase && fleetSize >= 5) {
+      const traderCount = cycleRoutineCounts.get("trader") ?? 0;
+      const crafterCount = cycleRoutineCounts.get("crafter") ?? 0;
+      if (traderCount === 0 && crafterCount > 0) {
+        // Prefer bots with cargo_expander or trader role, then highest cargo capacity
+        const traderCandidates = candidates
+          .filter(b => !assignedBots.has(b.botId) && b.routine !== "trader")
+          .sort((a, b) => {
+            const aRole = a.role === "trader" ? 1 : 0;
+            const bRole = b.role === "trader" ? 1 : 0;
+            if (aRole !== bRole) return bRole - aRole;
+            return (b.cargoCapacity ?? 0) - (a.cargoCapacity ?? 0);
+          });
+        const traderBot = traderCandidates[0];
+        if (traderBot) {
+          console.log(`[Commander] Guarantee: forcing ${traderBot.botId} → trader (${crafterCount} crafters active but no trader)`);
+          assignments.push({
+            botId: traderBot.botId,
+            routine: "trader",
+            params: this.buildParams("trader", traderBot, economy, goals, assignments, world),
+            score: 100,
+            reasoning: "Guaranteed: crafters active but no trader to sell goods",
+            previousRoutine: traderBot.routine ?? traderBot.lastRoutine,
+          });
+          assignedBots.add(traderBot.botId);
+          cycleRoutineCounts.set("trader", 1);
+          this.reassignmentState.set(traderBot.botId, {
+            lastAssignment: now,
+            lastRoutine: "trader",
+            cooldownUntil: now + this.getCooldownMs("trader"),
+          });
+        }
+      }
+    }
+
     // Fallback: if any idle bot (no routine) wasn't assigned, force-assign the best available routine
     for (const bot of candidates) {
       if (assignedBots.has(bot.botId)) continue;
@@ -634,9 +676,11 @@ export class ScoringBrain implements CommanderBrain {
   ): BotScore {
     // 1. Base score × strategy weight (bandit-learned or hardcoded default)
     const botRole = parseBotRole(bot.role);
-    const banditScore = this.banditBrain
+    let banditScore = this.banditBrain
       ? this.banditBrain.getScore(botRole ?? "generalist", routine, bot, economy, goals ?? [], fleet.bots.length, this.homeSystem)
       : null;
+    // Cap bandit scores to prevent runaway amplification
+    if (banditScore !== null) banditScore = Math.max(-100, Math.min(200, banditScore));
     const baseScore = (banditScore ?? this.config.baseScores[routine]) * weights[routine];
 
     // 2. Supply chain bonus: deficit detection boosts relevance
@@ -888,10 +932,10 @@ export class ScoringBrain implements CommanderBrain {
           .filter(([id]) => !id.includes("ore") && !id.includes("ice") && !id.includes("gas"));
         const totalFactionGoods = factionGoods.reduce((sum, [, qty]) => sum + qty, 0);
 
-        if (totalFactionGoods >= 100) traderBonus += 35;       // Strong sell pressure
-        else if (totalFactionGoods >= 50) traderBonus += 25;
-        else if (totalFactionGoods >= 20) traderBonus += 15;
-        else if (totalFactionGoods >= 5) traderBonus += 5;
+        if (totalFactionGoods >= 100) traderBonus += 50;       // Strong sell pressure — goods piling up
+        else if (totalFactionGoods >= 50) traderBonus += 35;
+        else if (totalFactionGoods >= 20) traderBonus += 20;
+        else if (totalFactionGoods >= 5) traderBonus += 10;
 
         // ── Ore sell signal: sell off when any ore type >60% of cap ──
         // Starts selling earlier than 80% to prevent hitting cap
@@ -904,10 +948,10 @@ export class ScoringBrain implements CommanderBrain {
         traderBonus += Math.min(40, oreSellPressure);
 
         // ── Market data quality gate: don't trade on stale data ──
-        // Stale data risks buying where no sellers exist or selling below market
-        const freshStationCount = economy.deficits.length + economy.surpluses.length; // proxy for data coverage
-        if (freshStationCount === 0) {
-          traderBonus -= 30; // No market intelligence — trading blind is dangerous
+        // Use actual cached station count (not deficit/surplus proxy which can be 0 when storage is balanced)
+        const cachedMarketCount = world?.hasAnyMarketData ? (world.freshStationIds?.length ?? 0) : 0;
+        if (cachedMarketCount < 3) {
+          traderBonus -= 15; // Limited market data — reduce confidence but don't block entirely
         }
 
         // ── Revenue momentum: keep trading when profitable ──

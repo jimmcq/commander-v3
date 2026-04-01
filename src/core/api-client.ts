@@ -614,11 +614,16 @@ export class ApiClient {
 
   async craft(recipeId: string, count?: number): Promise<CraftResult> {
     const data = await this.mutation<Record<string, unknown>>("craft", { recipe_id: recipeId, count });
+    // API returns outputs array: [{item_id, name, quantity, bonus_quantity?}]
+    const outputs = data.outputs as Array<Record<string, unknown>> | undefined;
+    const firstOutput = outputs?.[0];
+    const outputItem = str(firstOutput?.item_id ?? data.output_item ?? data.outputItem ?? "");
+    const outputQty = num(firstOutput?.quantity ?? data.output_quantity ?? data.outputQuantity ?? count ?? 1);
     return {
-      recipeId: (data.recipe_id as string) ?? recipeId,
-      outputItem: (data.output_item as string) ?? "",
-      outputQuantity: (data.output_quantity as number) ?? 1,
-      xpGained: (data.xp_gained as Record<string, number>) ?? {},
+      recipeId: str(data.recipe_id ?? data.recipeId ?? recipeId),
+      outputItem,
+      outputQuantity: outputQty || 1,
+      xpGained: (data.xp_gained ?? data.xpGained ?? {}) as Record<string, number>,
     };
   }
 
@@ -902,6 +907,11 @@ export class ApiClient {
 
   async supplyCommission(commissionId: string, itemId: string, quantity: number): Promise<Record<string, unknown>> {
     return this.mutation("supply_commission", { commission_id: commissionId, item_id: itemId, quantity });
+  }
+
+  /** Refit current ship to its latest class specs (free, v0.262.0+) */
+  async refitShip(): Promise<Record<string, unknown>> {
+    return this.mutation("refit_ship", {});
   }
 
   // ── Ship Marketplace ──
@@ -1334,6 +1344,7 @@ export class ApiClient {
           let errCode: string;
           let errMsg: string;
           let errWait: number | undefined;
+          let errDetails: Array<Record<string, unknown>> | undefined;
           if (typeof rawErr === "string") {
             errCode = rawErr;
             errMsg = rawErr;
@@ -1342,6 +1353,8 @@ export class ApiClient {
             errCode = String(e.code ?? e.error ?? e.type ?? "unknown");
             errMsg = String(e.message ?? e.detail ?? e.error ?? JSON.stringify(rawErr));
             errWait = typeof e.wait_seconds === "number" ? e.wait_seconds : undefined;
+            // Structured details (e.g. missing materials list, v0.261.0+)
+            if (Array.isArray(e.details)) errDetails = e.details as Array<Record<string, unknown>>;
           } else {
             errCode = "unknown";
             errMsg = String(rawErr);
@@ -1392,7 +1405,7 @@ export class ApiClient {
             continue;
           }
 
-          throw new ApiError(errCode, errMsg, errWait);
+          throw new ApiError(errCode, errMsg, errWait, errDetails);
         }
 
         return data.result;
@@ -1418,7 +1431,9 @@ export class ApiError extends Error {
   constructor(
     public code: string,
     message: string,
-    public waitSeconds?: number
+    public waitSeconds?: number,
+    /** Structured details from the API (e.g. missing materials list, v0.261.0+) */
+    public details?: Array<Record<string, unknown>>,
   ) {
     super(`[${code}] ${message}`);
     this.name = "ApiError";
@@ -1721,6 +1736,8 @@ export function normalizeCatalogItem(raw: Record<string, unknown>): CatalogItem 
   const cpuCost = num(raw.cpu_cost ?? raw.cpuCost ?? raw.cpu);
   const powerCost = num(raw.power_cost ?? raw.powerCost ?? raw.power);
   const slotType = str(raw.slot_type ?? raw.slotType ?? raw.slot ?? "");
+  const extractedBy = str(raw.extracted_by ?? raw.extractedBy ?? "");
+  const miningPower = num(raw.mining_power ?? raw.miningPower ?? raw.harvest_power ?? 0);
   return {
     id: str(raw.id ?? raw.item_id),
     name: str(raw.name),
@@ -1731,6 +1748,8 @@ export function normalizeCatalogItem(raw: Record<string, unknown>): CatalogItem 
     ...(cpuCost > 0 ? { cpuCost } : {}),
     ...(powerCost > 0 ? { powerCost } : {}),
     ...(slotType ? { slotType } : {}),
+    ...(extractedBy ? { extractedBy } : {}),
+    ...(miningPower > 0 ? { miningPower } : {}),
   };
 }
 

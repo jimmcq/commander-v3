@@ -1,16 +1,21 @@
 /**
  * Scout routine - continuous market data patrol.
  *
- * Rotates through trade hub systems, docking at every station and scanning
- * markets. Re-visits systems when their data goes stale (>30 min).
- * Keeps running indefinitely — not a one-shot routine.
+ * Dynamically builds a patrol route from:
+ *   1. Known trade hub systems (hardcoded seed list)
+ *   2. Systems with stations that have cached market data (discovered by traders/explorers)
+ *   3. Economy engine deficit/surplus stations
+ *
+ * Prioritizes stations by trade value (more orders = more valuable to keep fresh).
+ * Adjusts loop timing to keep data fresh without wasting fuel on low-value stations.
  *
  * Params:
- *   targetSystem: string        - Single system to scout (legacy, used if targetSystems empty)
- *   targetSystems: string[]     - Systems to patrol in order (loops forever)
+ *   targetSystem: string        - Single system to scout (legacy)
+ *   targetSystems: string[]     - Systems to patrol in order (overrides auto)
  *   scanMarket: boolean         - Scan market on dock (default: true)
  *   checkFaction: boolean       - Check faction storage/info at first stop (default: true)
  *   staleTtlMs: number          - Consider data stale after this many ms (default: 1800000 = 30min)
+ *   maxSystems: number          - Max systems per patrol loop (default: 15)
  */
 
 import type { BotContext } from "../bot/types";
@@ -23,7 +28,6 @@ import {
   findAndDock,
   refuelIfNeeded,
   repairIfNeeded,
-  cacheMarketData,
   getParam,
   interruptibleSleep,
   fleetViewMarket,
@@ -32,14 +36,141 @@ import {
 } from "./helpers";
 
 /**
- * Default trade hub systems to patrol when no targetSystems param is given.
- * Hardcoded so scouts work immediately without galaxy data.
+ * Seed trade hub systems — always included in patrol.
+ * These are known high-traffic systems that traders rely on.
  */
-const DEFAULT_TRADE_HUBS = [
+const SEED_TRADE_HUBS = [
   "sol", "nova_terra", "sirius", "procyon", "alpha_centauri", "nexus_prime",
-  "haven",           // Silicon ore at Commerce Fields — critical for circuit boards
-  "market_prime",    // Haven neighbor — Nebula Trade Federation hub
+  "haven", "market_prime",
 ];
+
+/** Minimum number of market orders for a station to be considered trade-relevant */
+const MIN_ORDERS_FOR_RELEVANCE = 5;
+
+/** How long before we consider data "must refresh" vs "nice to refresh" */
+const CRITICAL_STALE_MS = 45 * 60_000; // 45 min — data is critically stale
+const PREFERRED_STALE_MS = 25 * 60_000; // 25 min — refresh before 30min TTL
+
+interface StationScore {
+  stationId: string;
+  systemId: string;
+  orderCount: number;     // Number of market orders (proxy for trade value)
+  ageMs: number;          // How old the cached data is
+  priority: number;       // Computed priority (higher = scan sooner)
+}
+
+/**
+ * Build a prioritized list of systems to visit based on cached market data.
+ * Merges seed hubs with discovered stations, ranks by trade value × staleness.
+ */
+function buildPatrolRoute(
+  ctx: BotContext,
+  staleTtlMs: number,
+  maxSystems: number,
+): string[] {
+  const allFreshness = ctx.cache.getAllMarketFreshness(staleTtlMs);
+  const currentSystem = ctx.player.currentSystem ?? "";
+  const homeSystem = ctx.fleetConfig.homeSystem ?? "";
+
+  // Score each known station
+  const stationScores: StationScore[] = [];
+  for (const f of allFreshness) {
+    const systemId = ctx.galaxy.getSystemForBase(f.stationId) ?? "";
+    if (!systemId) continue;
+
+    // Get order count as proxy for trade value
+    const prices = ctx.cache.getMarketPrices(f.stationId);
+    const orderCount = prices?.length ?? 0;
+
+    const ageMs = f.ageMs;
+
+    // Priority: stale high-value stations first
+    // Base priority from order count (more orders = more important)
+    let priority = Math.min(orderCount, 100);
+
+    // Staleness multiplier: critically stale stations get 3x, preferred-stale get 2x
+    if (ageMs > CRITICAL_STALE_MS) {
+      priority *= 3;
+    } else if (ageMs > PREFERRED_STALE_MS) {
+      priority *= 2;
+    } else if (f.fresh) {
+      priority *= 0.1; // Fresh data — low priority
+    }
+
+    // Stations with meaningful trade activity always worth scanning
+    if (orderCount >= MIN_ORDERS_FOR_RELEVANCE && !f.fresh) {
+      priority = Math.max(priority, 50);
+    }
+
+    stationScores.push({ stationId: f.stationId, systemId, orderCount, ageMs, priority });
+  }
+
+  // Group by system, take highest station priority per system
+  const systemPriority = new Map<string, number>();
+  const systemOrderCount = new Map<string, number>();
+  for (const s of stationScores) {
+    const existing = systemPriority.get(s.systemId) ?? 0;
+    if (s.priority > existing) systemPriority.set(s.systemId, s.priority);
+    systemOrderCount.set(s.systemId, (systemOrderCount.get(s.systemId) ?? 0) + s.orderCount);
+  }
+
+  // Always include seed hubs (with base priority if not already scored)
+  for (const hub of SEED_TRADE_HUBS) {
+    if (!systemPriority.has(hub)) {
+      systemPriority.set(hub, 30); // Base priority for seed hubs
+    } else {
+      // Boost seed hubs slightly (they're known to be important)
+      systemPriority.set(hub, (systemPriority.get(hub) ?? 0) + 10);
+    }
+  }
+
+  // Always include home system
+  if (homeSystem && !systemPriority.has(homeSystem)) {
+    systemPriority.set(homeSystem, 25);
+  }
+
+  // Sort by priority descending, take top N
+  const ranked = Array.from(systemPriority.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, maxSystems)
+    .map(([sysId]) => sysId);
+
+  // Optimize visit order: nearest-neighbor from current system
+  if (ranked.length > 2 && currentSystem) {
+    const ordered = nearestNeighborRoute(ctx, currentSystem, ranked);
+    return ordered;
+  }
+
+  return ranked;
+}
+
+/** Simple nearest-neighbor TSP for patrol ordering */
+function nearestNeighborRoute(ctx: BotContext, start: string, systems: string[]): string[] {
+  const remaining = new Set(systems);
+  const route: string[] = [];
+  let current = start;
+
+  while (remaining.size > 0) {
+    let nearest = "";
+    let nearestDist = Infinity;
+    for (const sys of remaining) {
+      const dist = ctx.galaxy.getDistance(current, sys);
+      if (dist >= 0 && dist < nearestDist) {
+        nearestDist = dist;
+        nearest = sys;
+      }
+    }
+    if (!nearest) {
+      // Can't find distance — just take first remaining
+      nearest = remaining.values().next().value!;
+    }
+    route.push(nearest);
+    remaining.delete(nearest);
+    current = nearest;
+  }
+
+  return route;
+}
 
 /** Scan all stations in the current system, returns count of stations scanned */
 async function* scanSystemStations(
@@ -49,12 +180,10 @@ async function* scanSystemStations(
   let scanned = 0;
 
   // Scan current station — always scan if data is older than 30s
-  // (findAndDock may have just cached it, but we count that as scanned)
   if (ctx.player.dockedAtBase) {
     const freshness = ctx.cache.getMarketFreshness(ctx.player.dockedAtBase, staleTtlMs);
     const recentlyCached = freshness.fetchedAt > 0 && (Date.now() - freshness.fetchedAt) < 30_000;
     if (recentlyCached) {
-      // findAndDock already scanned this station moments ago — count it
       scanned++;
       yield `current station freshly cached (${Math.round((Date.now() - freshness.fetchedAt) / 1000)}s ago)`;
     } else if (!freshness.fresh) {
@@ -115,6 +244,7 @@ export async function* scout(ctx: BotContext): AsyncGenerator<RoutineYield, void
   const scanMarket = getParam(ctx, "scanMarket", true);
   const checkFaction = getParam(ctx, "checkFaction", true);
   const staleTtlMs = getParam(ctx, "staleTtlMs", 1_800_000); // 30 min
+  const maxSystems = getParam(ctx, "maxSystems", 15);
 
   // ── Check for scan work orders ──
   let activeWorkOrder: string | null = null;
@@ -128,25 +258,24 @@ export async function* scout(ctx: BotContext): AsyncGenerator<RoutineYield, void
     }
   } catch { /* work orders optional */ }
 
-  // Build system visit list — params override, otherwise use default trade hubs
+  // Build system visit list — params override, otherwise build dynamically
   const targetSystemsParam = getParam<string[]>(ctx, "targetSystems", []);
   const singleTarget = getParam(ctx, "targetSystem", "");
+  let useStaticRoute = false;
+
   let systemsToVisit: string[];
   if (targetSystemsParam.length > 0) {
     systemsToVisit = targetSystemsParam;
+    useStaticRoute = true;
   } else if (singleTarget) {
-    // Single target given — but always include trade hubs for a full patrol
     systemsToVisit = [singleTarget];
-    for (const hub of DEFAULT_TRADE_HUBS) {
+    for (const hub of SEED_TRADE_HUBS) {
       if (!systemsToVisit.includes(hub)) systemsToVisit.push(hub);
     }
+    useStaticRoute = true;
   } else {
-    // No params at all — use home system + default hubs
-    const home = ctx.fleetConfig.homeSystem;
-    systemsToVisit = home ? [home] : [];
-    for (const hub of DEFAULT_TRADE_HUBS) {
-      if (!systemsToVisit.includes(hub)) systemsToVisit.push(hub);
-    }
+    // Dynamic route — built fresh each loop from cached market data
+    systemsToVisit = buildPatrolRoute(ctx, staleTtlMs, maxSystems);
   }
 
   if (systemsToVisit.length === 0) {
@@ -158,23 +287,35 @@ export async function* scout(ctx: BotContext): AsyncGenerator<RoutineYield, void
   let checkedFaction = false;
   let loopCount = 0;
 
-  yield `market patrol: ${systemsToVisit.join(" → ")} (${systemsToVisit.length} systems, stale=${Math.round(staleTtlMs / 60_000)}min)`;
+  yield `market patrol: ${systemsToVisit.length} systems (${useStaticRoute ? "static" : "dynamic"}, stale=${Math.round(staleTtlMs / 60_000)}min)`;
 
   // Continuous patrol loop
   while (!ctx.shouldStop) {
     loopCount++;
+
+    // Rebuild route each loop (dynamic mode) — picks up new stations traders discovered
+    if (!useStaticRoute && loopCount > 1) {
+      systemsToVisit = buildPatrolRoute(ctx, staleTtlMs, maxSystems);
+      if (systemsToVisit.length === 0) {
+        systemsToVisit = [...SEED_TRADE_HUBS]; // Fallback
+      }
+    }
+
     let totalScanned = 0;
     let systemsVisited = 0;
+    let systemsSkippedFresh = 0;
+
+    yield `[loop ${loopCount}] patrol: ${systemsToVisit.join(" → ")}`;
 
     for (const targetSystem of systemsToVisit) {
       if (ctx.shouldStop) return;
 
-      // Check if this system has any stale data worth refreshing
-      // On first loop (loopCount === 1), always visit everything
+      // Skip systems with all-fresh data (except first loop)
       if (loopCount > 1) {
         const systemFreshness = getSystemFreshness(ctx, targetSystem, staleTtlMs);
         if (systemFreshness === "fresh") {
-          continue; // All stations in this system have fresh data
+          systemsSkippedFresh++;
+          continue;
         }
       }
 
@@ -182,18 +323,16 @@ export async function* scout(ctx: BotContext): AsyncGenerator<RoutineYield, void
       if (ctx.player.currentSystem === targetSystem) {
         yield `[${loopCount}] already in ${targetSystem}`;
       } else {
-        // Fuel gate: ensure enough fuel to reach target AND return to a station
+        // Fuel gate
         const fuelPerJump = ctx.nav.estimateJumpFuel(ctx.ship);
         const currentSys = ctx.player.currentSystem ?? "";
         const distToTarget = ctx.galaxy.getDistance(currentSys, targetSystem);
         if (distToTarget > 0) {
-          // Reserve fuel for return to home system (or at least same distance back)
           const homeSystem = ctx.fleetConfig.homeSystem ?? currentSys;
           const distHome = ctx.galaxy.getDistance(targetSystem, homeSystem);
           const returnDist = Math.max(1, distHome > 0 ? distHome : distToTarget);
           const fuelNeeded = (distToTarget + returnDist) * fuelPerJump + 3;
           if (ctx.ship.fuel < fuelNeeded) {
-            // If fuel is too low for ANY remaining system, end patrol early
             if (ctx.ship.fuel < fuelPerJump * 3) {
               yield `fuel too low to continue patrol (${ctx.ship.fuel} fuel) — ending loop`;
               break;
@@ -208,16 +347,14 @@ export async function* scout(ctx: BotContext): AsyncGenerator<RoutineYield, void
           await navigateTo(ctx, targetSystem);
         } catch (err) {
           yield `navigation to ${targetSystem} failed: ${err instanceof Error ? err.message : String(err)}`;
-          continue; // Try next system
+          continue;
         }
       }
 
       if (ctx.shouldStop) return;
 
-      // Ensure system detail
       await ensureSystemDetail(ctx);
 
-      // Dock at first station
       try {
         await findAndDock(ctx);
       } catch (err) {
@@ -232,7 +369,6 @@ export async function* scout(ctx: BotContext): AsyncGenerator<RoutineYield, void
 
       if (ctx.shouldStop) return;
 
-      // Scan all stations in this system
       if (scanMarket) {
         const scanned = yield* scanSystemStations(ctx, staleTtlMs);
         totalScanned += scanned;
@@ -264,7 +400,6 @@ export async function* scout(ctx: BotContext): AsyncGenerator<RoutineYield, void
         } catch { /* non-critical */ }
       }
 
-      // Service ship between systems
       await refuelIfNeeded(ctx);
       await repairIfNeeded(ctx);
     }
@@ -278,14 +413,24 @@ export async function* scout(ctx: BotContext): AsyncGenerator<RoutineYield, void
       } catch { /* non-critical */ }
     }
 
-    yield `patrol loop ${loopCount} complete: ${systemsVisited} system(s) visited, ${totalScanned} station(s) scanned`;
+    yield `patrol loop ${loopCount} done: ${systemsVisited} visited, ${totalScanned} scanned, ${systemsSkippedFresh} skipped (fresh)`;
 
     if (ctx.shouldStop) return;
 
-    // Wait before starting next patrol loop
-    // Shorter wait if we barely scanned anything (data is mostly fresh)
-    const waitMs = totalScanned <= 1 ? 300_000 : 60_000; // 5min if fresh, 1min if lots scanned
-    yield `next patrol in ${Math.round(waitMs / 60_000)}min`;
+    // Adaptive wait: if most data is fresh, wait longer before next loop
+    const freshRatio = systemsToVisit.length > 0
+      ? systemsSkippedFresh / systemsToVisit.length
+      : 0;
+    let waitMs: number;
+    if (freshRatio > 0.8) {
+      waitMs = 300_000; // 5min — most data fresh, no rush
+    } else if (freshRatio > 0.5) {
+      waitMs = 120_000; // 2min — some staleness building up
+    } else {
+      waitMs = 60_000;  // 1min — lots of stale data, scan again soon
+    }
+
+    yield `next patrol in ${Math.round(waitMs / 60_000)}min (${Math.round(freshRatio * 100)}% fresh)`;
     const interrupted = await interruptibleSleep(ctx, waitMs);
     if (interrupted) return;
   }
@@ -293,14 +438,12 @@ export async function* scout(ctx: BotContext): AsyncGenerator<RoutineYield, void
 
 /**
  * Check if all known stations in a system have fresh market data.
- * Returns "fresh" if all are fresh, "stale" if any need refresh, "unknown" if no data.
  */
 function getSystemFreshness(
   ctx: BotContext,
   systemId: string,
   staleTtlMs: number,
 ): "fresh" | "stale" | "unknown" {
-  // Look up system in galaxy to find station IDs
   const system = ctx.galaxy.getSystem(systemId);
   if (!system) return "unknown";
 

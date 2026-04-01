@@ -36,6 +36,9 @@ export interface SharedServices {
   sessionStore: SessionStore;
   eventBus: EventBus;
   workOrderManager?: import("../commander/work-order-manager").WorkOrderManager;
+  navLoopDetector?: import("../core/nav-loop-detector").NavLoopDetector;
+  sellDeconfliction?: import("../core/sell-deconfliction").SellDeconfliction;
+  circuitBreaker?: import("../core/circuit-breaker").CircuitBreaker;
 }
 
 export interface BotManagerConfig {

@@ -76,6 +76,18 @@ export async function navigateTo(
   targetSystemId: string,
   targetPoiId?: string
 ): Promise<void> {
+  // Nav loop detection — warn if repeatedly traveling to same destination
+  if (ctx.navLoopDetector) {
+    const loop = ctx.navLoopDetector.record(ctx.botId, targetSystemId);
+    if (loop.warning) {
+      logWarn(ctx, loop.warning);
+      // After 5+ loops, throw to break the routine
+      if (loop.count >= 5) {
+        throw new Error(`Nav loop abort: ${targetSystemId} visited ${loop.count} times`);
+      }
+    }
+  }
+
   // Undock first if docked - refuel before leaving
   if (ctx.player.dockedAtBase) {
     await ensureFuelSafety(ctx);
@@ -1163,6 +1175,9 @@ export function recordSellResult(
   priceEach: number, quantity: number,
 ): void {
   if (!stationId || !itemId || priceEach <= 0 || quantity <= 0) return;
+
+  // Fleet-wide sell tracking for deconfliction
+  ctx.sellDeconfliction?.recordSell(ctx.botId, stationId, itemId, quantity, priceEach);
 
   const existing = ctx.cache.getMarketPrices(stationId) ?? [];
   const entry = existing.find((p) => p.itemId === itemId);

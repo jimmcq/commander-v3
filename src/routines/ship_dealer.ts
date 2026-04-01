@@ -292,9 +292,16 @@ async function* commissionShip(
     }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    yield `commission failed: ${msg}`;
+    // v0.261.0+: structured details array with all missing materials
+    const details = (err as any)?.details as Array<Record<string, unknown>> | undefined;
+    if (details?.length) {
+      const matList = details.map(d => `${d.quantity ?? "?"}x ${d.item_id ?? d.name ?? "?"}`).join(", ");
+      yield `commission needs materials: ${matList}`;
+    } else {
+      yield `commission failed: ${msg}`;
+    }
     // If provide_materials failed, try without (pay full price)
-    if (msg.includes("material") || msg.includes("insufficient")) {
+    if (msg.includes("material") || msg.includes("insufficient") || details?.length) {
       yield `retrying without material supply (paying full)...`;
       try {
         const result = await ctx.api.commissionShip(shipClass, false);

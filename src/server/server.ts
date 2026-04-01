@@ -357,6 +357,7 @@ async function handleCreditsRoute(url: URL, db: DB): Promise<Response> {
     filtered.map(r => ({
       time: new Date(Number(r.timestamp)).toISOString(),
       credits: r.totalCredits,
+      factionCredits: (r as any).factionCredits ?? 0,
       activeBots: r.activeBots,
     }))
   );

@@ -307,8 +307,16 @@ export async function* miner(ctx: BotContext): AsyncGenerator<RoutineYield, void
         const oreLabel = lastMinedOre ? lastMinedOre.replace(/_/g, " ") : "";
         const cargoFill = ctx.ship.cargoCapacity > 0 ? Math.round((ctx.ship.cargoUsed / ctx.ship.cargoCapacity) * 100) : 0;
         yield `mining ${oreLabel}${totalMined > 0 ? ` (${totalMined} mined, ${cargoFill}% full)` : ""}`;
+
+        // Circuit breaker: skip mine() if it's been failing repeatedly
+        if (ctx.circuitBreaker && !ctx.circuitBreaker.canCall("mine")) {
+          yield "mine circuit breaker open — pausing mining";
+          break;
+        }
+
         try {
           const result = await ctx.api.mine();
+          ctx.circuitBreaker?.recordSuccess("mine");
           mineCount++;
           lastMinedOre = result.resourceId || lastMinedOre;
           totalMined += result.quantity;
@@ -329,6 +337,7 @@ export async function* miner(ctx: BotContext): AsyncGenerator<RoutineYield, void
           });
         } catch (err) {
           const errMsg = err instanceof Error ? err.message : String(err);
+          ctx.circuitBreaker?.recordFailure("mine", errMsg);
           yield `mining error: ${errMsg}`;
           // cargo_full is NOT belt depletion — just means we need to sell
           if (!errMsg.includes("cargo_full")) {

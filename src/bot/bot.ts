@@ -39,6 +39,9 @@ export interface BotDeps {
   eventBus: EventBus;
   getFleetStatus: () => FleetStatus;
   workOrderManager?: import("../commander/work-order-manager").WorkOrderManager;
+  navLoopDetector?: import("../core/nav-loop-detector").NavLoopDetector;
+  sellDeconfliction?: import("../core/sell-deconfliction").SellDeconfliction;
+  circuitBreaker?: import("../core/circuit-breaker").CircuitBreaker;
 }
 
 export class Bot {
@@ -649,6 +652,9 @@ export class Bot {
       eventBus: deps.eventBus,
       getFleetStatus: deps.getFleetStatus,
       workOrderManager: deps.workOrderManager,
+      navLoopDetector: deps.navLoopDetector,
+      sellDeconfliction: deps.sellDeconfliction,
+      circuitBreaker: deps.circuitBreaker,
       params: this._params,
       settings: this.settings,
       fleetConfig: this.fleetConfig,
