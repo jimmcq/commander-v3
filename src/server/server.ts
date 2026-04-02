@@ -660,11 +660,19 @@ async function handlePublicWorkOrders(opts: ServerOptions): Promise<Response> {
     claimedAt: o.claimedAt,
     createdAt: o.createdAt,
     expiresAt: o.expiresAt,
+    chainId: o.chainId ?? null,
+    dependsOn: o.dependsOn ?? null,
+    routineHint: o.routineHint ?? null,
     ageMin: Math.round((Date.now() - o.createdAt) / 60000),
   }));
 
+  // Group chain progress
+  const chainIds = new Set(orders.filter(o => o.chainId).map(o => o.chainId!));
+  const chains = [...chainIds].map(id => wom.getChainProgress(id)).filter(c => c.total > 0);
+
   return new Response(JSON.stringify({
     orders,
+    chains,
     stats: wom.getStats(),
     timestamp: new Date().toISOString(),
   }), {

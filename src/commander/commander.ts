@@ -581,6 +581,23 @@ export class Commander {
     const facilityNeeds = this.deps.cache.getFacilityMaterialNeeds();
     this.economy.setFacilityMaterialNeeds(facilityNeeds);
 
+    // Step 1.8: Feed pending ship upgrades to economy engine for chain generation
+    const scoringBrainRef = this.getScoringBrain();
+    if (scoringBrainRef?.pendingUpgrades) {
+      this.economy.pendingShipUpgrades = [...scoringBrainRef.pendingUpgrades.entries()].map(([botId, p]) => {
+        const bot = fleet.bots.find(b => b.botId === botId);
+        return {
+          botId,
+          shipClass: p.targetShipClass,
+          price: p.targetPrice,
+          botCredits: bot?.credits ?? 0,
+          currentShip: bot?.shipClass ?? "unknown",
+          role: p.role,
+          stationId: p.buyStation,
+        };
+      });
+    }
+
     // Step 2: Analyze economy
     const economySnapshot = this.economy.analyze(fleet);
 

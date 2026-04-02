@@ -56,6 +56,12 @@ export class EconomyEngine {
   /** Track which chains we've already created (prevent duplicates) */
   private createdChains = new Set<string>();
 
+  /** Pending ship upgrades from Commander (for ship upgrade chains) */
+  pendingShipUpgrades: Array<{
+    botId: string; shipClass: string; price: number;
+    botCredits: number; currentShip: string; role: string; stationId?: string;
+  }> = [];
+
   /** Update facility material needs (called by Commander after QM sets cache) */
   setFacilityMaterialNeeds(needs: Map<string, number>): void {
     this.facilityMaterialNeeds = new Map(needs);
@@ -172,6 +178,139 @@ export class EconomyEngine {
         },
       ]);
       this.createdChains.add(chainName);
+    }
+
+    // ── Facility upgrade auto-trigger chain ──
+    // When all materials are in storage, create the final upgrade step
+    if (this.facilityMaterialNeeds.size > 0) {
+      let allMaterialsMet = true;
+      for (const [itemId, needed] of this.facilityMaterialNeeds) {
+        const inStorage = this.factionInventory.get(itemId) ?? 0;
+        if (inStorage < needed) { allMaterialsMet = false; break; }
+      }
+      if (allMaterialsMet && !this.createdChains.has("facility_do_upgrade")) {
+        this.workOrderManager.createChain("facility_do_upgrade", [{
+          type: "buy", // QM handles facility upgrades
+          targetId: "faction_warehouse",
+          description: "Upgrade faction facility (all materials ready)",
+          priority: 98, // Highest priority — everything is ready
+          reason: "all facility materials accumulated",
+          routineHint: "quartermaster",
+        }]);
+        this.createdChains.add("facility_do_upgrade");
+        console.log("[Economy] Facility upgrade materials complete — queued upgrade order");
+      }
+    }
+
+    // ── Multi-step crafting chains ──
+    // For items with multi-step recipes (ore → intermediate → final product),
+    // create ordered chains so bots craft in the right sequence
+    if (this.crafting) {
+      // Find items with high demand (deficit) that require multi-step crafting
+      for (const [itemId, needed] of this.facilityMaterialNeeds) {
+        const inStorage = this.factionInventory.get(itemId) ?? 0;
+        if (inStorage >= needed) continue;
+        const deficit = needed - inStorage;
+
+        const chainName = `craft_chain_${itemId}`;
+        if (this.createdChains.has(chainName)) continue;
+
+        // Build full crafting chain using the crafting service
+        const recipes = this.crafting.findRecipesForItem(itemId);
+        const recipe = recipes[0];
+        if (!recipe) continue;
+
+        const chain = this.crafting.buildChain(recipe.id, Math.min(deficit, 50));
+        if (chain.length <= 1) continue; // Single-step, already handled by regular orders
+
+        const steps: FleetWorkOrder[] = [];
+        for (const step of chain) {
+          // Check if we need to mine raw materials first
+          for (const input of step.inputs) {
+            if (input.isRaw) {
+              const rawStock = this.factionInventory.get(input.itemId) ?? 0;
+              if (rawStock < input.quantity) {
+                steps.push({
+                  type: "mine",
+                  targetId: input.itemId,
+                  description: `Mine ${input.quantity - rawStock} ${input.itemName} for ${step.output.itemName}`,
+                  priority: 88,
+                  reason: `chain step: need ${input.quantity}, have ${rawStock}`,
+                  quantity: input.quantity - rawStock,
+                  requiredModule: "mining_laser",
+                  routineHint: "miner",
+                });
+              }
+            }
+          }
+          // Craft step
+          steps.push({
+            type: "craft",
+            targetId: step.recipeId,
+            description: `Craft ${step.output.quantity} ${step.output.itemName}`,
+            priority: 89 + (chain.indexOf(step) * 0.5), // Later steps slightly higher priority
+            reason: `chain step ${chain.indexOf(step) + 1}/${chain.length}`,
+            quantity: step.batchCount,
+            routineHint: "crafter",
+          });
+        }
+
+        if (steps.length > 1) {
+          this.workOrderManager.createChain(chainName, steps);
+          this.createdChains.add(chainName);
+        }
+      }
+    }
+
+    // ── Ship upgrade chains ──
+    // When a bot has a pending ship upgrade, create: earn credits → buy/commission → refit
+    if (this.pendingShipUpgrades.length > 0) {
+      for (const upgrade of this.pendingShipUpgrades) {
+        const chainName = `ship_upgrade_${upgrade.botId}`;
+        if (this.createdChains.has(chainName)) continue;
+
+        const steps: FleetWorkOrder[] = [];
+
+        // Step 1: If bot needs credits, create a trade order to earn them
+        if (upgrade.botCredits < upgrade.price) {
+          const deficit = upgrade.price - upgrade.botCredits;
+          steps.push({
+            type: "trade",
+            targetId: "earn_credits",
+            description: `Earn ${deficit}cr for ${upgrade.shipClass} (${upgrade.botId})`,
+            priority: 72,
+            reason: `ship upgrade: need ${upgrade.price}cr, have ${upgrade.botCredits}cr`,
+            routineHint: "trader",
+          });
+        }
+
+        // Step 2: Buy/commission the ship
+        steps.push({
+          type: "buy",
+          targetId: upgrade.shipClass,
+          description: `Buy ${upgrade.shipClass} for ${upgrade.botId}`,
+          priority: 80,
+          reason: `ship upgrade: ${upgrade.currentShip} → ${upgrade.shipClass}`,
+          stationId: upgrade.stationId,
+          priceLimit: upgrade.price,
+          routineHint: "ship_upgrade" as any,
+        });
+
+        // Step 3: Refit modules
+        steps.push({
+          type: "buy", // refit is handled as a buy-type order
+          targetId: `refit_${upgrade.botId}`,
+          description: `Refit ${upgrade.botId} for ${upgrade.role} role`,
+          priority: 81,
+          reason: `new ship needs role-appropriate modules`,
+          routineHint: "refit" as any,
+        });
+
+        if (steps.length > 0) {
+          this.workOrderManager.createChain(chainName, steps);
+          this.createdChains.add(chainName);
+        }
+      }
     }
 
     // Reset chain tracking periodically so new chains can be created

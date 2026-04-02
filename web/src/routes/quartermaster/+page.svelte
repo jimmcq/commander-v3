@@ -16,7 +16,16 @@
 		claimedAt: number | null;
 		createdAt: number;
 		expiresAt: number;
+		chainId: string | null;
+		dependsOn: string[] | null;
+		routineHint: string | null;
 		ageMin: number;
+	}
+
+	interface ChainProgress {
+		total: number;
+		completed: number;
+		current: string | null;
 	}
 
 	interface WOStats {
@@ -25,10 +34,12 @@
 		claimed: number;
 		inProgress: number;
 		completed: number;
+		chains: number;
 	}
 
 	interface WOData {
 		orders: WorkOrder[];
+		chains: ChainProgress[];
 		stats: WOStats;
 	}
 
@@ -141,6 +152,32 @@
 		</div>
 	{/if}
 
+	<!-- Active Chains -->
+	{#if data && data.chains && data.chains.length > 0}
+		<div class="card p-4">
+			<h2 class="text-sm font-semibold text-chrome-silver uppercase tracking-wider mb-3">Active Chains</h2>
+			<div class="space-y-2">
+				{#each data.chains as chain}
+					<div class="flex items-center gap-3 p-2 rounded bg-deep-space/50">
+						<div class="flex-1">
+							<p class="text-sm text-star-white">{chain.current ?? "Waiting..."}</p>
+							<p class="text-xs text-hull-grey">{chain.completed}/{chain.total} steps complete</p>
+						</div>
+						<div class="w-32 h-2 bg-deep-space rounded-full overflow-hidden">
+							<div
+								class="h-full rounded-full transition-all duration-500 {chain.completed === chain.total ? 'bg-bio-green' : 'bg-plasma-cyan'}"
+								style="width: {Math.round((chain.completed / Math.max(chain.total, 1)) * 100)}%"
+							></div>
+						</div>
+						<span class="text-xs mono {chain.completed === chain.total ? 'text-bio-green' : 'text-plasma-cyan'}">
+							{Math.round((chain.completed / Math.max(chain.total, 1)) * 100)}%
+						</span>
+					</div>
+				{/each}
+			</div>
+		</div>
+	{/if}
+
 	<!-- Economy snapshot from WebSocket -->
 	{#if $economy}
 		<div class="card p-4">
@@ -204,6 +241,7 @@
 								</td>
 								<td class="py-2 px-2 text-star-white max-w-[250px] truncate" title={order.description}>
 									{order.description}
+									{#if order.chainId}<span class="ml-1 text-[9px] px-1 py-0.5 rounded bg-void-purple/20 text-void-purple">chain</span>{/if}
 								</td>
 								<td class="py-2 px-2 mono text-chrome-silver">
 									{order.quantity ?? "—"}
