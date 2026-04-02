@@ -615,28 +615,8 @@ export class Commander {
       }
     }
 
-    // Step 3.8: Fleet health monitoring (overseer pattern)
-    try {
-      const botSnapshots = fleet.bots.map(b => ({
-        botId: b.botId, status: b.status, routine: b.routine,
-        fuelPct: b.fuelPct, hullPct: b.hullPct, credits: b.credits,
-        docked: b.docked, systemId: b.systemId ?? "", role: b.role ?? undefined,
-      }));
-      const health = evaluateFleetHealth(botSnapshots, {
-        minCredits: this.deps.minBotCredits ?? 0,
-        homeSystem: this.deps.homeSystem ?? "",
-      });
-      // Log critical issues
-      if (health.criticalBots.length > 0) {
-        const names = health.criticalBots.map(b => `${b.botId}(${b.score})`).join(", ");
-        console.log(`[FleetHealth] ${health.overallScore}/100 — ${health.criticalBots.length} critical: ${names}`);
-      }
-      for (const rec of health.recommendations) {
-        console.log(`[FleetHealth] Recommendation: ${rec}`);
-      }
-      // Store for dashboard
-      this._lastFleetHealth = health;
-    } catch { /* fleet health optional */ }
+    // Step 3.8: Fleet health monitoring (runs in separate scope to avoid Bun scope bugs)
+    this.runFleetHealth(fleet);
 
     // Step 3.9: Pre-evaluation emergency overrides — clear cooldowns BEFORE brain runs
     this.applyEmergencyOverrides(fleet);
@@ -1081,6 +1061,29 @@ export class Commander {
 
       console.log(`[Commander] Ship upgrade queued: ${bot.botId} ${currentClass.id} → ${upgrade.id} (role=${role}, price=${upgrade.basePrice}cr, score ${currentScore}→${upgradeScore}, ROI=${roi.toFixed(2)}, station=${shipyard.stationId}) [${stats}]`);
     }
+  }
+
+  /** Fleet health monitoring — separate method to avoid Bun scope issues in main eval */
+  private runFleetHealth(fleet: FleetStatus): void {
+    try {
+      const botSnapshots = fleet.bots.map(b => ({
+        botId: b.botId, status: b.status, routine: b.routine,
+        fuelPct: b.fuelPct, hullPct: b.hullPct, credits: b.credits,
+        docked: b.docked, systemId: b.systemId ?? "", role: b.role ?? undefined,
+      }));
+      const health = evaluateFleetHealth(botSnapshots, {
+        minCredits: this.deps.minBotCredits ?? 0,
+        homeSystem: this.deps.homeSystem ?? "",
+      });
+      if (health.criticalBots.length > 0) {
+        const names = health.criticalBots.map(b => `${b.botId}(${b.score})`).join(", ");
+        console.log(`[FleetHealth] ${health.overallScore}/100 — ${health.criticalBots.length} critical: ${names}`);
+      }
+      for (const rec of health.recommendations) {
+        console.log(`[FleetHealth] Recommendation: ${rec}`);
+      }
+      this._lastFleetHealth = health;
+    } catch { /* fleet health optional */ }
   }
 
   /** Clear cooldowns for bots in emergency states (low fuel, low hull) so brain can reassign them */

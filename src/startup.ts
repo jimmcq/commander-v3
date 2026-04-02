@@ -651,6 +651,9 @@ export async function startup(config: AppConfig): Promise<AppServices> {
   console.log("[Startup] Facility material needs set: warehouse upgrade (steel plates, circuit boards, raw ores)");
 
   // ── Start Commander Eval Loop ──
+  // Clear all cooldowns on startup so bots get fresh assignments immediately
+  const sb = commander.getScoringBrain?.();
+  if (sb) sb.clearAllCooldowns();
   commander.start();
 
   return {
