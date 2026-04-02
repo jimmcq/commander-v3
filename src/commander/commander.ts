@@ -23,6 +23,7 @@ import { PerformanceTracker } from "./performance-tracker";
 import { ChatIntelligence } from "./chat-intelligence";
 import type { MemoryStore } from "../data/memory-store";
 import type { StuckBot } from "../types/protocol";
+import { evaluateFleetHealth } from "../core/fleet-health";
 import { type BotRole, type RolePoolConfig, DEFAULT_POOL_CONFIG, parseBotRole, routineToRole } from "./roles";
 import { EmbeddingStore, type OutcomeCategory } from "./embedding-store";
 import { extractContext } from "./bandit-brain";
@@ -597,8 +598,6 @@ export class Commander {
 
     // Step 3.8: Fleet health monitoring (overseer pattern)
     try {
-      const fleetHealthMod = require("../core/fleet-health") as { evaluateFleetHealth: typeof import("../core/fleet-health").evaluateFleetHealth };
-      const { evaluateFleetHealth } = fleetHealthMod;
       const botSnapshots = fleet.bots.map(b => ({
         botId: b.botId, status: b.status, routine: b.routine,
         fuelPct: b.fuelPct, hullPct: b.hullPct, credits: b.credits,
