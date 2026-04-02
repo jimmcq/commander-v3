@@ -522,7 +522,7 @@ export class ScoringBrain implements CommanderBrain {
       if (qmCount === 0) {
         // Find best unassigned bot for QM (prefer docked bots at home)
         const qmCandidates = candidates
-          .filter(b => !assignedBots.has(b.botId))
+          .filter(b => b.routine !== "quartermaster" && b.routine !== "ship_upgrade")
           .sort((a, b) => {
             // Prefer bots at home system, then docked, then by lowest switch cost
             const aHome = a.systemId === this.homeSystem ? 1 : 0;
@@ -592,14 +592,16 @@ export class ScoringBrain implements CommanderBrain {
       }
     }
 
-    // Guarantee pass: ensure minimum 1 trader when fleet >= 5 and crafters are active
+    // Guarantee pass: ensure minimum 1 trader when fleet >= 5
+    // CRITICAL: Override cooldown locks — take ANY available bot, even if locked
+    // Without this, the fleet stagnates (all bots on cooldown → 0 unassigned → no trader)
     if (this.homeBase && fleetSize >= 5) {
       const traderCount = cycleRoutineCounts.get("trader") ?? 0;
-      const crafterCount = cycleRoutineCounts.get("crafter") ?? 0;
-      if (traderCount === 0 && crafterCount > 0) {
-        // Prefer bots with cargo_expander or trader role, then highest cargo capacity
+      if (traderCount === 0) {
+        // Prefer bots with trader role or cargo_expander, then highest cargo capacity
+        // Include already-assigned bots (override their assignment) — fleet NEEDS revenue
         const traderCandidates = candidates
-          .filter(b => !assignedBots.has(b.botId) && b.routine !== "trader")
+          .filter(b => b.routine !== "trader" && b.routine !== "ship_upgrade" && b.routine !== "refit")
           .sort((a, b) => {
             const aRole = a.role === "trader" ? 1 : 0;
             const bRole = b.role === "trader" ? 1 : 0;
@@ -608,13 +610,13 @@ export class ScoringBrain implements CommanderBrain {
           });
         const traderBot = traderCandidates[0];
         if (traderBot) {
-          console.log(`[Commander] Guarantee: forcing ${traderBot.botId} → trader (${crafterCount} crafters active but no trader)`);
+          console.log(`[Commander] Guarantee: forcing ${traderBot.botId} → trader (fleet needs revenue)`);
           assignments.push({
             botId: traderBot.botId,
             routine: "trader",
             params: this.buildParams("trader", traderBot, economy, goals, assignments, world),
             score: 100,
-            reasoning: "Guaranteed: crafters active but no trader to sell goods",
+            reasoning: "Guaranteed: fleet needs at least 1 trader for revenue",
             previousRoutine: traderBot.routine ?? traderBot.lastRoutine,
           });
           assignedBots.add(traderBot.botId);

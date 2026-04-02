@@ -597,7 +597,8 @@ export class Commander {
 
     // Step 3.8: Fleet health monitoring (overseer pattern)
     try {
-      const { evaluateFleetHealth } = await import("../core/fleet-health");
+      const fleetHealthMod = require("../core/fleet-health") as { evaluateFleetHealth: typeof import("../core/fleet-health").evaluateFleetHealth };
+      const { evaluateFleetHealth } = fleetHealthMod;
       const botSnapshots = fleet.bots.map(b => ({
         botId: b.botId, status: b.status, routine: b.routine,
         fuelPct: b.fuelPct, hullPct: b.hullPct, credits: b.credits,

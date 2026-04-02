@@ -69,6 +69,9 @@ export class Bot {
   private _factionWithdrawals = 0;
   /** Credits deposited to faction treasury (not real costs). Drained by broadcast loop. */
   private _factionDeposits = 0;
+  /** Cumulative faction transfers (never reset — used for per-bot profit calculation) */
+  _cumulativeFactionWithdrawals = 0;
+  _cumulativeFactionDeposits = 0;
 
   /** Full skill data (fetched via getSkills after login) */
   private _skills: Record<string, { level: number; xp: number; xpNext: number }> = {};
@@ -177,10 +180,12 @@ export class Bot {
   /** Record a faction treasury withdrawal (not real revenue) */
   recordFactionWithdrawal(amount: number): void {
     this._factionWithdrawals += amount;
+    this._cumulativeFactionWithdrawals += amount;
   }
   /** Record a faction treasury deposit (not real cost — internal transfer) */
   recordFactionDeposit(amount: number): void {
     this._factionDeposits += amount;
+    this._cumulativeFactionDeposits += amount;
   }
 
   setActiveMissions(missions: Array<{ id: string; title: string; type: string; objectives: Array<{ description: string; progress: number; target: number; complete: boolean }> }>): void {

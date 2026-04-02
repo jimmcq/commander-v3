@@ -175,6 +175,17 @@ export function startBroadcastLoop(deps: BroadcastDeps): () => void {
         };
         const financialSource = routineToSource(bot.routine ?? undefined);
 
+        // Cap per-tick financial events — large jumps are faction treasury moves, not real profit
+        // Real trading/mining/crafting rarely produces >50K in a single 3s tick
+        const MAX_TICK_DELTA = 50_000;
+        if (delta > MAX_TICK_DELTA || delta < -MAX_TICK_DELTA) {
+          // Log but don't record as financial event — almost certainly a faction transfer
+          if (Math.abs(delta) > 100_000) {
+            console.log(`[Economy] Skipped large delta for ${bot.botId}: ${delta > 0 ? "+" : ""}${delta}cr (likely faction transfer)`);
+          }
+          delta = 0;
+        }
+
         if (delta > 0) {
           ecoTracker.recordRevenue(delta);
           deps.trainingLogger?.logFinancialEvent("revenue", delta, bot.botId, financialSource);
@@ -298,12 +309,19 @@ export function startBroadcastLoop(deps: BroadcastDeps): () => void {
     // Fleet update (every 3s) — use full BotSummary (not FleetBotInfo) for dashboard
     const botSummaries = deps.botManager.getSummaries().map(b => {
       const snaps = botSnapshots.get(b.id) ?? [];
-      // Running total: credits earned since first snapshot (no extrapolation)
+      // Calculate earned credits by summing small deltas (excludes faction transfer spikes)
+      // Each snapshot pair is ~30s apart — only count deltas under 50K (real earnings)
       let creditsEarned = 0;
-      if (snaps.length >= 1) {
-        creditsEarned = b.credits - snaps[0].credits;
+      for (let i = 1; i < snaps.length; i++) {
+        const d = snaps[i].credits - snaps[i - 1].credits;
+        if (Math.abs(d) <= 50_000) creditsEarned += d; // Skip faction transfer spikes
       }
-      return { ...b, creditsPerHour: creditsEarned }; // Field name kept for backwards compat
+      // Add delta from last snapshot to current
+      if (snaps.length > 0) {
+        const lastDelta = b.credits - snaps[snaps.length - 1].credits;
+        if (Math.abs(lastDelta) <= 50_000) creditsEarned += lastDelta;
+      }
+      return { ...b, creditsPerHour: creditsEarned };
     });
 
     broadcast({

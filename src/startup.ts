@@ -358,12 +358,15 @@ export async function startup(config: AppConfig): Promise<AppServices> {
     commander.addResourceDiscovery(e.botId, e.scarce);
   });
 
-  // Attach bandit brain to scoring brain (learns base weights from outcomes)
-  const scoringBrain = commander.getScoringBrain?.() ?? (brain instanceof ScoringBrain ? brain : null);
-  if (scoringBrain) {
-    (scoringBrain as any).banditBrain = banditBrain;
-    console.log("[Startup] Bandit brain attached to scoring brain");
-  }
+  // Bandit brain DISABLED — episode count inflation causes degenerate scoring.
+  // Pure scoring brain defaults are stable and well-tuned.
+  // TODO: Fix bandit persistence (episodeCount accumulates pulls, not real episodes)
+  // const scoringBrain = commander.getScoringBrain?.() ?? (brain instanceof ScoringBrain ? brain : null);
+  // if (scoringBrain) {
+  //   (scoringBrain as any).banditBrain = banditBrain;
+  //   console.log("[Startup] Bandit brain attached to scoring brain");
+  // }
+  console.log("[Startup] Bandit brain DISABLED — using pure scoring brain defaults");
 
   // Load role pool config from config.toml
   if (config.fleet.roles.length > 0) {

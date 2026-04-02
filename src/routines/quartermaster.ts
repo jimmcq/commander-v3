@@ -1484,6 +1484,7 @@ async function* manageFactionFacilities(
           yield `withdrawing ${deficit}cr from faction treasury for ${facilityType.replace(/_/g, " ")} upgrade`;
           try {
             await ctx.api.factionWithdrawCredits(deficit);
+            ctx.recordFactionWithdrawal(deficit); // Exclude from revenue tracking
             await ctx.refreshState();
             yield `withdrew ${deficit}cr — bot now has ${ctx.player.credits}cr`;
           } catch (err) {
