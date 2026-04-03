@@ -288,9 +288,9 @@
 										<td class="py-2 pr-4 text-right mono {(botRevenue24h[bot.id] ?? 0) >= 0 ? 'text-bio-green' : 'text-claw-red'}">
 											{(botRevenue24h[bot.id] ?? 0) >= 0 ? "+" : ""}{(botRevenue24h[bot.id] ?? 0).toLocaleString()}
 										</td>
-										<td class="py-2 pr-4 text-right mono">
-											<span class="{(bot.uptimePct ?? 0) >= 90 ? 'text-bio-green' : (bot.uptimePct ?? 0) >= 70 ? 'text-warning-yellow' : 'text-claw-red'}">
-												{Math.round(bot.uptimePct ?? 0)}%
+										<td class="py-2 pr-4 text-right mono" title="Session: {Math.round(bot.uptimePct ?? 0)}%">
+											<span class="{(bot.uptimePct1h ?? 0) >= 90 ? 'text-bio-green' : (bot.uptimePct1h ?? 0) >= 70 ? 'text-warning-yellow' : 'text-claw-red'}">
+												{Math.round(bot.uptimePct1h ?? 0)}%
 											</span>
 										</td>
 										<td class="py-2 pr-4 text-right mono">

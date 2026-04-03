@@ -85,6 +85,8 @@ export class Bot {
   /** Uptime tracking: time spent running a routine vs total online time */
   private _runningTimeMs = 0;
   private _lastRunningCheck = 0;
+  /** Rolling 1-hour uptime: array of [timestamp, wasRunning] samples every 30s */
+  private _uptimeSamples: Array<[number, boolean]> = [];
 
   /** Cached name resolution for toSummary() — updated on location change */
   private _cachedSystemName: string | null = null;
@@ -161,17 +163,34 @@ export class Bot {
     return this._loginTime ? Date.now() - this._loginTime : 0;
   }
 
-  /** Compute uptime percentage (time running a routine vs total online time) */
+  /** Compute session uptime percentage (time running a routine vs total online time) */
   private computeUptimePct(): number {
     const now = Date.now();
+    const isRunning = this._status === "running" && !!this._routine;
     // Accumulate running time since last check
-    if (this._status === "running" && this._routine && this._lastRunningCheck > 0) {
+    if (isRunning && this._lastRunningCheck > 0) {
       this._runningTimeMs += now - this._lastRunningCheck;
     }
     this._lastRunningCheck = now;
+    // Record 1h rolling sample (every ~30s via toSummary calls)
+    if (this._uptimeSamples.length === 0 || now - this._uptimeSamples[this._uptimeSamples.length - 1][0] >= 25_000) {
+      this._uptimeSamples.push([now, isRunning]);
+      // Trim to 1 hour
+      const cutoff = now - 3_600_000;
+      while (this._uptimeSamples.length > 0 && this._uptimeSamples[0][0] < cutoff) {
+        this._uptimeSamples.shift();
+      }
+    }
     const total = this.uptime;
     if (total <= 0) return 0;
     return Math.min(100, Math.round((this._runningTimeMs / total) * 100));
+  }
+
+  /** Compute 1-hour rolling uptime percentage */
+  private computeUptimePct1h(): number {
+    if (this._uptimeSamples.length < 2) return this.computeUptimePct(); // Fallback to session
+    const running = this._uptimeSamples.filter(([, r]) => r).length;
+    return Math.min(100, Math.round((running / this._uptimeSamples.length) * 100));
   }
   get rapidRoutines(): Map<RoutineName, number> {
     // Lazy cleanup: remove expired entries (older than 2 minutes)
@@ -320,6 +339,7 @@ export class Bot {
       error: this._error,
       uptime: this.uptime,
       uptimePct: this.computeUptimePct(),
+      uptimePct1h: this.computeUptimePct1h(),
       cargo: this._ship?.cargo.map((c) => ({ itemId: c.itemId, quantity: c.quantity })) ?? [],
       modules: this._ship?.modules.map((m) => ({ id: m.id, moduleId: m.moduleId, name: m.name })) ?? [],
       ownedShips: this._ownedShips.map((s) => ({ id: s.id, classId: s.classId, name: null, location: s.location || null })),

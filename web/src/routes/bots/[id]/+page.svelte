@@ -290,7 +290,11 @@
 								<span class="text-star-white mono">{Math.floor(bot.uptime / 3600000)}h {Math.floor((bot.uptime % 3600000) / 60000)}m</span>
 							</div>
 							<div class="flex justify-between">
-								<span class="text-chrome-silver">Active %</span>
+								<span class="text-chrome-silver">Active (1h)</span>
+								<span class="mono {(bot.uptimePct1h ?? 0) >= 90 ? 'text-bio-green' : (bot.uptimePct1h ?? 0) >= 70 ? 'text-warning-yellow' : 'text-claw-red'}">{Math.round(bot.uptimePct1h ?? 0)}%</span>
+							</div>
+							<div class="flex justify-between">
+								<span class="text-chrome-silver">Active (session)</span>
 								<span class="mono {(bot.uptimePct ?? 0) >= 90 ? 'text-bio-green' : (bot.uptimePct ?? 0) >= 70 ? 'text-warning-yellow' : 'text-claw-red'}">{Math.round(bot.uptimePct ?? 0)}%</span>
 							</div>
 							{#if bot.destination}
