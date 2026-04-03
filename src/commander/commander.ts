@@ -99,6 +99,8 @@ export class Commander {
   private lastStuckBots: StuckBot[] = [];
   /** Fleet health assessment (overseer pattern) */
   private _lastFleetHealth: import("../core/fleet-health").FleetHealth | null = null;
+  /** World context (stored as property to avoid Bun scope bug) */
+  private _world: WorldContext | null = null;
   /** Tracks per-bot performance outcomes for LLM feedback */
   private performanceTracker = new PerformanceTracker();
   /** Chat intelligence — reads and learns from global/faction chat */
@@ -602,7 +604,10 @@ export class Commander {
     const economySnapshot = this.economy.analyze(fleet);
 
     // Step 3: Build world context from real data
-    const world = this.buildWorldContext(fleet);
+    // NOTE: stored as instance property to work around Bun scope bug
+    // where `const world` randomly becomes undefined in later code
+    this._world = this.buildWorldContext(fleet);
+    const world = this._world;
 
     // Step 3.5: Track performance outcomes (for LLM feedback)
     this.performanceTracker.update(fleet);
