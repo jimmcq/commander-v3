@@ -82,6 +82,10 @@ export class Bot {
   /** Cached active missions (updated by mission_runner routine) */
   private _activeMissions: Array<{ id: string; title: string; type: string; objectives: Array<{ description: string; progress: number; target: number; complete: boolean }> }> = [];
 
+  /** Uptime tracking: time spent running a routine vs total online time */
+  private _runningTimeMs = 0;
+  private _lastRunningCheck = 0;
+
   /** Cached name resolution for toSummary() — updated on location change */
   private _cachedSystemName: string | null = null;
   private _cachedPoiName: string | null = null;
@@ -155,6 +159,19 @@ export class Bot {
   }
   get uptime(): number {
     return this._loginTime ? Date.now() - this._loginTime : 0;
+  }
+
+  /** Compute uptime percentage (time running a routine vs total online time) */
+  private computeUptimePct(): number {
+    const now = Date.now();
+    // Accumulate running time since last check
+    if (this._status === "running" && this._routine && this._lastRunningCheck > 0) {
+      this._runningTimeMs += now - this._lastRunningCheck;
+    }
+    this._lastRunningCheck = now;
+    const total = this.uptime;
+    if (total <= 0) return 0;
+    return Math.min(100, Math.round((this._runningTimeMs / total) * 100));
   }
   get rapidRoutines(): Map<RoutineName, number> {
     // Lazy cleanup: remove expired entries (older than 2 minutes)
@@ -302,6 +319,7 @@ export class Bot {
       jumpsRemaining: this.resolveJumpsRemaining(),
       error: this._error,
       uptime: this.uptime,
+      uptimePct: this.computeUptimePct(),
       cargo: this._ship?.cargo.map((c) => ({ itemId: c.itemId, quantity: c.quantity })) ?? [],
       modules: this._ship?.modules.map((m) => ({ id: m.id, moduleId: m.moduleId, name: m.name })) ?? [],
       ownedShips: this._ownedShips.map((s) => ({ id: s.id, classId: s.classId, name: null, location: s.location || null })),

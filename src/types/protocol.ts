@@ -83,6 +83,7 @@ export interface BotSummary {
   jumpsRemaining: number | null; // Jumps to reach destination system
   error: string | null;
   uptime: number; // ms since login
+  uptimePct: number; // % of time actively running a routine (0-100)
   cargo: Array<{ itemId: string; quantity: number }>;
   modules: Array<{ id: string; moduleId: string; name: string }>;
   ownedShips: Array<{ id: string; classId: string; name: string | null; location: string | null }>;

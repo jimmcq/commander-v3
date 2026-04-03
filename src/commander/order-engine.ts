@@ -370,47 +370,67 @@ export class OrderEngine {
   // ── Tier 4: Supply Chain (mine orders from demand) ──
 
   private generateSupplyOrders(bots: FleetBotInfo[], ctx: OrderContext, orders: FleetWorkOrder[]): void {
-    // Compute what we need from observed consumption + stock targets
-    const demandItems = new Map<string, number>(); // itemId → desired quantity
-
-    // Stock target deficits
+    // ── 1. Stock target deficits (from config) ──
     for (const target of this.stockTargets) {
       const current = this.factionInventory.get(target.item_id) ?? 0;
       if (current < target.min_stock) {
-        demandItems.set(target.item_id, (demandItems.get(target.item_id) ?? 0) + (target.min_stock - current));
+        const deficit = target.min_stock - current;
+        const isOre = target.item_id.endsWith("_ore") || target.item_id.includes("crystal");
+        if (isOre) {
+          orders.push({
+            type: "mine", targetId: target.item_id,
+            description: `Mine ${deficit} ${target.item_id} (stock target)`,
+            priority: PRI.SUPPLY_HIGH, reason: "stock_target",
+            quantity: deficit, requiredModule: "mining_laser",
+          });
+        }
       }
     }
 
-    // Observed consumption outpacing production
+    // ── 2. Auto-detect supply needs from faction storage state ──
+    // LOW ores (< 500 units) → mine more
+    const LOW_ORE_THRESHOLD = 500;
+    const oreTypes = ["iron_ore", "copper_ore", "silicon_ore", "titanium_ore", "gold_ore", "platinum_ore"];
+    for (const ore of oreTypes) {
+      const stock = this.factionInventory.get(ore) ?? 0;
+      if (stock < LOW_ORE_THRESHOLD) {
+        const pri = stock === 0 ? PRI.SUPPLY_HIGH : (stock < 100 ? PRI.SUPPLY_MED : PRI.SUPPLY_MED - 5);
+        const nearestResource = ctx.galaxy.findNearestResourceById?.(ore, this.config.homeSystem);
+        orders.push({
+          type: "mine", targetId: ore,
+          description: `Mine ${ore.replace("_ore", "")} (${stock} in storage, need ${LOW_ORE_THRESHOLD})`,
+          priority: pri, reason: stock === 0 ? "zero_stock" : "low_stock",
+          quantity: LOW_ORE_THRESHOLD - stock, requiredModule: "mining_laser",
+          stationId: nearestResource?.systemId,
+        });
+      }
+    }
+
+    // ── 3. Observed consumption outpacing production ──
     const consumptionRates = this.getAggregateRates("consumption");
     const productionRates = this.getAggregateRates("production");
     for (const [itemId, consumeRate] of consumptionRates) {
       const produceRate = productionRates.get(itemId) ?? 0;
-      if (consumeRate > produceRate * 1.2) { // 20% buffer
-        const shortfall = Math.ceil((consumeRate - produceRate) * 2); // 2 hours buffer
-        demandItems.set(itemId, (demandItems.get(itemId) ?? 0) + shortfall);
+      if (consumeRate > produceRate * 1.2) {
+        const isOre = itemId.endsWith("_ore") || itemId.includes("crystal") || itemId.includes("gas") || itemId.includes("ice");
+        if (!isOre) continue;
+        const shortfall = Math.ceil((consumeRate - produceRate) * 2);
+        orders.push({
+          type: "mine", targetId: itemId,
+          description: `Mine ${itemId} (consumption > production)`,
+          priority: PRI.SUPPLY_MED - 5, reason: "consumption_deficit",
+          quantity: shortfall, requiredModule: "mining_laser",
+        });
       }
     }
 
-    // Generate mine orders for demanded ores
-    for (const [itemId, qty] of demandItems) {
-      const isOre = itemId.endsWith("_ore") || itemId.includes("crystal") || itemId.includes("gas") || itemId.includes("ice");
-      if (!isOre) continue;
-
-      // Calculate priority based on deficit severity
-      const stock = this.factionInventory.get(itemId) ?? 0;
-      const urgency = stock === 0 ? PRI.SUPPLY_HIGH : (stock < qty ? PRI.SUPPLY_MED : PRI.SUPPLY_MED - 10);
-
-      // Find best system for this ore (from galaxy resource index)
-      const nearestResource = ctx.galaxy.findNearestResourceById?.(itemId, this.config.homeSystem);
-      const systemHint = nearestResource?.systemId;
-
+    // ── 4. Consumable supplies: fuel cells, repair kits ──
+    const fuelCells = this.factionInventory.get("fuel_cell") ?? 0;
+    if (fuelCells < 100) {
       orders.push({
-        type: "mine", targetId: itemId,
-        description: `Mine ${qty} ${itemId}${systemHint ? ` near ${systemHint}` : ""}`,
-        priority: urgency, reason: stock === 0 ? "zero_stock" : "supply_deficit",
-        quantity: qty, requiredModule: "mining_laser",
-        stationId: systemHint, // system hint for proximity scoring
+        type: "craft", targetId: "craft_fuel_cell",
+        description: `Craft fuel cells (${fuelCells} in storage, need 100)`,
+        priority: PRI.SUPPLY_MED, reason: "low_fuel_cells",
       });
     }
   }
@@ -565,29 +585,107 @@ export class OrderEngine {
   // ── Tier 10: Standing Orders ──
 
   private generateStandingOrders(bots: FleetBotInfo[], ctx: OrderContext, orders: FleetWorkOrder[]): void {
-    // Standing "mine best ore" orders — always available for miners
+    // ── MINERS: standing mine orders for common ores ──
     const oreTypes = ["iron_ore", "copper_ore", "silicon_ore", "titanium_ore", "gold_ore", "platinum_ore"];
     for (const ore of oreTypes) {
+      // Boost silicon priority (needed for optical fiber bundles → facilities)
+      const pri = ore === "silicon_ore" ? PRI.STANDING + 10 : PRI.STANDING;
       orders.push({
         type: "mine", targetId: ore,
         description: `Mine ${ore.replace("_ore", "")} (standing)`,
-        priority: PRI.STANDING, reason: "standing_mine",
+        priority: pri, reason: "standing_mine",
         requiredModule: "mining_laser",
       });
     }
 
-    // Standing explore order
+    // ── TRADERS: sell surplus from faction storage ──
+    // Find items in faction storage with > 100 units that aren't raw ore
+    for (const [itemId, qty] of this.factionInventory) {
+      if (qty < 50) continue;
+      if (itemId.endsWith("_ore")) continue; // Ores stay for crafting
+      orders.push({
+        type: "sell", targetId: itemId,
+        description: `Sell ${qty} ${itemId.replace(/_/g, " ")} (standing)`,
+        priority: PRI.STANDING + 5, reason: "standing_sell",
+        quantity: qty,
+        stationId: this.config.factionStorageStation ?? this.config.homeBase,
+      });
+    }
+
+    // ── TRADERS: general trade run ──
+    orders.push({
+      type: "trade", targetId: "best_available",
+      description: "Find and run best trade route (standing)",
+      priority: PRI.STANDING + 3, reason: "standing_trade",
+    });
+
+    // ── CRAFTERS: craft profitable items from available materials ──
+    // Check what ores we have in faction storage and craft from them
+    const hasIron = (this.factionInventory.get("iron_ore") ?? 0) > 50;
+    const hasCopper = (this.factionInventory.get("copper_ore") ?? 0) > 50;
+    const hasSilicon = (this.factionInventory.get("silicon_ore") ?? 0) > 30;
+    if (hasIron) {
+      orders.push({
+        type: "craft", targetId: "smelt_steel",
+        description: "Craft steel plates from iron (standing)",
+        priority: PRI.STANDING + 5, reason: "standing_craft",
+      });
+    }
+    if (hasCopper) {
+      orders.push({
+        type: "craft", targetId: "draw_copper_wire",
+        description: "Craft copper wiring (standing)",
+        priority: PRI.STANDING + 5, reason: "standing_craft",
+      });
+    }
+    if (hasSilicon) {
+      orders.push({
+        type: "craft", targetId: "spin_optical_fiber",
+        description: "Craft optical fiber bundles from silicon (standing)",
+        priority: PRI.STANDING + 8, reason: "standing_craft_facility",
+      });
+    }
+
+    // ── QUARTERMASTER: manage market orders ──
+    orders.push({
+      type: "buy", targetId: "manage_orders",
+      description: "Manage buy/sell orders at home station (standing)",
+      priority: PRI.STANDING + 3, reason: "standing_qm",
+    });
+
+    // ── EXPLORER: explore unvisited systems ──
     orders.push({
       type: "explore", targetId: "nearest_unvisited",
       description: "Explore nearest unvisited system (standing)",
-      priority: PRI.STANDING - 5, reason: "standing_explore",
+      priority: PRI.STANDING, reason: "standing_explore",
+    });
+    orders.push({
+      type: "explore", targetId: "nearest_unvisited_2",
+      description: "Explore frontier systems (standing)",
+      priority: PRI.STANDING - 2, reason: "standing_explore",
     });
 
-    // Standing scout order
+    // ── SCOUT: patrol trade hubs ──
     orders.push({
       type: "scan", targetId: "trade_hub_patrol",
       description: "Patrol trade hubs for market intel (standing)",
-      priority: PRI.STANDING - 3, reason: "standing_scout",
+      priority: PRI.STANDING, reason: "standing_scout",
+    });
+
+    // ── HUNTER: patrol for pirates ──
+    orders.push({
+      type: "explore", targetId: "hunt_patrol",
+      description: "Patrol for pirate targets (standing)",
+      priority: PRI.STANDING - 3, reason: "standing_hunt",
+      routineHint: "hunter",
+    });
+
+    // ── MISSION RUNNER: find and complete missions ──
+    orders.push({
+      type: "deliver", targetId: "best_mission",
+      description: "Find and complete best available mission (standing)",
+      priority: PRI.STANDING + 2, reason: "standing_mission",
+      routineHint: "mission_runner",
     });
   }
 

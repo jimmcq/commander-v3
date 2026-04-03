@@ -231,6 +231,7 @@
 									<th class="pb-2 pr-4">Location</th>
 									<th class="pb-2 pr-4 text-right">Credits</th>
 									<th class="pb-2 pr-4 text-right">24h Rev</th>
+									<th class="pb-2 pr-4 text-right">Uptime</th>
 									<th class="pb-2 pr-4 text-right">Fuel</th>
 									<th class="pb-2 text-right">Cargo</th>
 								</tr>
@@ -286,6 +287,11 @@
 										</td>
 										<td class="py-2 pr-4 text-right mono {(botRevenue24h[bot.id] ?? 0) >= 0 ? 'text-bio-green' : 'text-claw-red'}">
 											{(botRevenue24h[bot.id] ?? 0) >= 0 ? "+" : ""}{(botRevenue24h[bot.id] ?? 0).toLocaleString()}
+										</td>
+										<td class="py-2 pr-4 text-right mono">
+											<span class="{(bot.uptimePct ?? 0) >= 90 ? 'text-bio-green' : (bot.uptimePct ?? 0) >= 70 ? 'text-warning-yellow' : 'text-claw-red'}">
+												{Math.round(bot.uptimePct ?? 0)}%
+											</span>
 										</td>
 										<td class="py-2 pr-4 text-right mono">
 											<span class={bot.fuelPct < 20 ? "text-claw-red" : bot.fuelPct < 50 ? "text-warning-yellow" : "text-star-white"}>
