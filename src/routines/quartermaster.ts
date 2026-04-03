@@ -310,6 +310,11 @@ export async function* quartermaster(ctx: BotContext): AsyncGenerator<RoutineYie
 
     if (ctx.shouldStop) return;
 
+    // ── 4.5. Review stale sell orders ──
+    yield* reviewStaleSellOrders(ctx, priceIndex);
+
+    if (ctx.shouldStop) return;
+
     // ── 5. Faction facility management (check & upgrade) ──
     yield* manageFactionFacilities(ctx, factionStorage);
 
@@ -1405,6 +1410,115 @@ function calculateBuyPrice(
 // ════════════════════════════════════════════════════════════════════
 // Faction Facility Management
 // ════════════════════════════════════════════════════════════════════
+
+/**
+/** Items that should never be sold — needed for crafting/facilities */
+const QM_DO_NOT_SELL = new Set([
+  "energy_crystal", "silicon_ore", "circuit_board", "optical_fiber_bundle",
+  "fuel_cell", "repair_kit", "trade_cipher", "trade_crystal",
+]);
+
+/**
+ * Review and clean up stale sell orders.
+ * - Cancel orders older than 24h that haven't fully filled
+ * - Cancel orders for protected items (DO_NOT_SELL)
+ * - Reprice orders where market price shifted >30%
+ * Max 3 actions per cycle to avoid rate limiting.
+ */
+async function* reviewStaleSellOrders(
+  ctx: BotContext,
+  priceIndex: Map<string, any>,
+): AsyncGenerator<RoutineYield, void, void> {
+  if (!ctx.player.dockedAtBase) return;
+
+  let actions = 0;
+  const MAX_REVIEW_ACTIONS = 3;
+  const STALE_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours
+  const now = Date.now();
+
+  try {
+    // Check personal orders at current station
+    const orders = await ctx.api.viewOrders();
+    const sellOrders = (orders as any[]).filter((o: any) => o.type === "sell" && o.remaining > 0);
+
+    if (sellOrders.length === 0) return;
+    yield `reviewing ${sellOrders.length} active sell order(s)`;
+
+    for (const order of sellOrders) {
+      if (ctx.shouldStop || actions >= MAX_REVIEW_ACTIONS) break;
+
+      const itemId = order.itemId ?? order.item_id ?? "";
+      const orderId = order.id ?? order.order_id ?? "";
+      const priceEach = order.priceEach ?? order.price_each ?? 0;
+      const createdAt = order.createdAt ?? order.created_at;
+      const age = createdAt ? now - new Date(String(createdAt)).getTime() : 0;
+
+      // Cancel protected items (shouldn't be selling these)
+      if (QM_DO_NOT_SELL.has(itemId)) {
+        try {
+          await ctx.api.cancelOrder(orderId);
+          actions++;
+          yield `cancelled sell order: ${itemId} (protected item — needed for facilities)`;
+        } catch { /* order may already be filled */ }
+        continue;
+      }
+
+      // Cancel very stale orders (>24h unfilled)
+      if (age > STALE_AGE_MS) {
+        try {
+          await ctx.api.cancelOrder(orderId);
+          actions++;
+          yield `cancelled stale sell order: ${itemId} @ ${priceEach}cr (${Math.round(age / 3_600_000)}h old)`;
+        } catch { /* order may already be filled */ }
+        continue;
+      }
+
+      // Reprice if market price shifted significantly (>30%)
+      const priceInfo = priceIndex.get(itemId);
+      if (priceInfo && priceEach > 0) {
+        const marketPrice = priceInfo.medianSell ?? priceInfo.avgSell ?? priceInfo.sellPrice ?? 0;
+        if (marketPrice > 0) {
+          const priceDiff = Math.abs(marketPrice - priceEach) / priceEach;
+          if (priceDiff > 0.3) {
+            const newPrice = Math.round(marketPrice * 0.95); // Slightly below market for faster fill
+            try {
+              await ctx.api.modifyOrder(orderId, newPrice);
+              actions++;
+              yield `repriced sell order: ${itemId} ${priceEach}cr → ${newPrice}cr (market shifted ${Math.round(priceDiff * 100)}%)`;
+            } catch { /* modify may fail */ }
+          }
+        }
+      }
+    }
+
+    // Also check faction sell orders
+    try {
+      const factionOrders = await ctx.api.viewOrders(undefined, "faction");
+      const factionSellOrders = (factionOrders as any[]).filter((o: any) => o.type === "sell" && o.remaining > 0);
+
+      for (const order of factionSellOrders) {
+        if (ctx.shouldStop || actions >= MAX_REVIEW_ACTIONS) break;
+
+        const itemId = order.itemId ?? order.item_id ?? "";
+        const orderId = order.id ?? order.order_id ?? "";
+
+        if (QM_DO_NOT_SELL.has(itemId)) {
+          try {
+            await ctx.api.cancelOrder(orderId);
+            actions++;
+            yield `cancelled faction sell order: ${itemId} (protected)`;
+          } catch { /* may fail */ }
+        }
+      }
+    } catch { /* faction order viewing may not be supported */ }
+
+    if (actions > 0) {
+      yield `reviewed orders: ${actions} action(s) taken`;
+    }
+  } catch (err) {
+    yield `sell order review failed: ${err instanceof Error ? err.message : String(err)}`;
+  }
+}
 
 /**
  * Check faction facilities at the home station and upgrade if possible.
