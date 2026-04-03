@@ -87,7 +87,12 @@
 	/** Get freshness color for a system based on most recent POI scan */
 	function getSystemFreshnessColor(sys: SystemNode): string {
 		const scans = (sys.pois ?? []).map(p => p.scannedAt ?? 0).filter(t => t > 0);
-		if (scans.length === 0) return FRESHNESS_COLORS.unknown;
+		if (scans.length === 0) {
+			// No scan timestamps — use visited flag as fallback
+			// Visited systems are "stale" (we've been there but data may be old)
+			// Unvisited systems are "unknown"
+			return sys.visited ? FRESHNESS_COLORS.stale : FRESHNESS_COLORS.unknown;
+		}
 		const newest = Math.max(...scans);
 		const ageMs = Date.now() - newest;
 		if (ageMs < 10 * 60_000) return FRESHNESS_COLORS.fresh;
@@ -484,8 +489,44 @@
 			}
 		}
 
-		// 6. Bot positions overlay
+		// 6. Bot positions overlay + route lines
 		if (activeFilters.has("bots")) {
+			// Draw route lines FIRST (under bot icons)
+			for (const bot of bots) {
+				if (!bot.systemId || !bot.destination) continue;
+				const fromSys = systemMap.get(bot.systemId);
+				// Try to find destination system by name match
+				const destName = bot.destination.split(" → ").pop()?.trim() ?? bot.destination;
+				const toSys = systems.find(s => s.name === destName || s.id === destName);
+				if (!fromSys || !toSys || fromSys.id === toSys.id) continue;
+
+				const [x1, y1] = worldToScreen(fromSys.x, fromSys.y);
+				const [x2, y2] = worldToScreen(toSys.x, toSys.y);
+				const color = ROUTINE_COLORS[bot.routine ?? ""] ?? "#5a6a7a";
+
+				// Animated dashed line
+				ctx.strokeStyle = color + "66";
+				ctx.lineWidth = 2;
+				ctx.setLineDash([6, 4]);
+				ctx.lineDashOffset = -time * 20; // Animate dash movement
+				ctx.beginPath();
+				ctx.moveTo(x1, y1);
+				ctx.lineTo(x2, y2);
+				ctx.stroke();
+				ctx.setLineDash([]); // Reset
+
+				// Arrow at destination
+				const angle = Math.atan2(y2 - y1, x2 - x1);
+				const arrowSize = 6;
+				ctx.fillStyle = color + "88";
+				ctx.beginPath();
+				ctx.moveTo(x2, y2);
+				ctx.lineTo(x2 - arrowSize * Math.cos(angle - 0.4), y2 - arrowSize * Math.sin(angle - 0.4));
+				ctx.lineTo(x2 - arrowSize * Math.cos(angle + 0.4), y2 - arrowSize * Math.sin(angle + 0.4));
+				ctx.closePath();
+				ctx.fill();
+			}
+
 			// Group bots by system for stacking
 			const botsBySystem = new Map<string, typeof bots>();
 			for (const bot of bots) {
@@ -500,7 +541,7 @@
 				if (!sys) continue;
 
 				const [baseSx, baseSy] = worldToScreen(sys.x, sys.y);
-				const size = 6 * zoom;
+				const size = Math.max(4, 7 * zoom); // Bigger diamonds
 				const nodeSize = Math.max(3, 5 * zoom);
 				// Offset bots above and to the right of the system node
 				const baseOffsetX = nodeSize + size + 4;
@@ -538,14 +579,45 @@
 						ctx.stroke();
 					}
 
+					// Outline for visibility at any zoom
+					ctx.strokeStyle = "#0a0e17";
+					ctx.lineWidth = 1;
+					ctx.beginPath();
+					ctx.moveTo(sx, sy - size);
+					ctx.lineTo(sx + size, sy);
+					ctx.lineTo(sx, sy + size);
+					ctx.lineTo(sx - size, sy);
+					ctx.closePath();
+					ctx.stroke();
+
 					// Bot label (to the right of the diamond)
-					if (zoom > 0.5) {
+					if (zoom > 0.3) {
 						ctx.font = `${Math.max(8, 10 * zoom)}px 'JetBrains Mono', monospace`;
 						ctx.fillStyle = color;
 						ctx.textAlign = "left";
 						ctx.fillText(bot.username, sx + size + 3, sy + 3);
 					}
 				}
+			}
+		}
+
+			// Bot count badge on system node (visible at any zoom)
+			for (const [systemId, systemBots] of botsBySystem) {
+				const sys = systemMap.get(systemId);
+				if (!sys) continue;
+				const [sx, sy] = worldToScreen(sys.x, sys.y);
+				const badgeR = Math.max(5, 8 * zoom);
+				// Small circle with count, bottom-right of system node
+				ctx.fillStyle = "#00d4ff";
+				ctx.beginPath();
+				ctx.arc(sx + badgeR + 2, sy + badgeR + 2, badgeR, 0, Math.PI * 2);
+				ctx.fill();
+				ctx.fillStyle = "#0a0e17";
+				ctx.font = `bold ${Math.max(7, 9 * zoom)}px sans-serif`;
+				ctx.textAlign = "center";
+				ctx.textBaseline = "middle";
+				ctx.fillText(String(systemBots.length), sx + badgeR + 2, sy + badgeR + 2);
+				ctx.textBaseline = "alphabetic";
 			}
 		}
 
