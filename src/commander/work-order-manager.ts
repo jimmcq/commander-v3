@@ -386,11 +386,11 @@ export class WorkOrderManager {
 
   // ── Maintenance ──
 
-  /** Clean up stale claims — orders claimed by bots that are no longer active */
+  /** Clean up stale claims — orders claimed by bots that are no longer active or too old */
   cleanupStaleClaims(activeBotIds: Set<string>, maxClaimAgeMs = 600_000): void {
     const now = Date.now();
     for (const [id, order] of this.orders) {
-      if (order.status !== "claimed") continue;
+      if (order.status !== "claimed" && order.status !== "in_progress") continue;
       const botGone = order.claimedBy && !activeBotIds.has(order.claimedBy);
       const tooOld = order.claimedAt && (now - order.claimedAt > maxClaimAgeMs);
       if (botGone || tooOld) {

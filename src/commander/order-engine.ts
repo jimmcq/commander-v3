@@ -71,6 +71,18 @@ const REVENUE_ORES: Record<string, { minStock: number; sellValue: number }> = {
   palladium_ore: { minStock: 100, sellValue: 50 },
 };
 
+/** Items that should NEVER be sold — needed for crafting/facilities */
+const DO_NOT_SELL = new Set([
+  "energy_crystal",    // Needed for optical fiber + circuit boards
+  "silicon_ore",       // Needed for optical fiber
+  "circuit_board",     // Needed for facilities (350 total)
+  "optical_fiber_bundle", // Needed for facilities (200 total)
+  "fuel_cell",         // Keep for bot fuel reserves
+  "repair_kit",        // Keep for bot field repairs
+  "trade_cipher",      // Needed for Trade Ledger
+  "trade_crystal",     // Input for trade ciphers
+]);
+
 /** Tier 4: Bulk — low value, don't mine unless actually needed */
 const BULK_ORES = new Set(["nickel_ore", "carbon_ore", "aluminum_ore", "vanadium_ore", "iridium_ore", "tungsten_ore"]);
 const BULK_MIN_STOCK = 5000; // Only mine if below this
@@ -384,6 +396,10 @@ export class OrderEngine {
           quantity: deficit, requiredModule: "mining_laser",
         });
       } else {
+        // Skip facility-only items that can't be hand-crafted (trade_cipher etc)
+        const FACILITY_ONLY_ITEMS = new Set(["trade_cipher"]);
+        if (FACILITY_ONLY_ITEMS.has(itemId)) continue;
+
         // Craftable material — check if we have a recipe
         const recipes = ctx.crafting.findRecipesForItem(itemId);
         const recipe = recipes.length > 0 ? recipes[0] : null;
@@ -636,6 +652,7 @@ export class OrderEngine {
     // Also sell items with no stock target that are piling up
     for (const [itemId, qty] of this.factionInventory) {
       if (qty < 100) continue; // Not worth selling small amounts
+      if (DO_NOT_SELL.has(itemId)) continue; // Protected items — needed for crafting/facilities
       if (this.stockTargets.some(t => t.item_id === itemId)) continue; // Has target, handled above
       if (itemId.endsWith("_ore")) continue; // Keep ores for crafting
 
@@ -697,13 +714,17 @@ export class OrderEngine {
       }
     }
 
-    // Explore unvisited neighbor systems
+    // Explore unvisited neighbor systems (cap at 5 to avoid flooding order pool)
+    let exploreCount = 0;
+    const MAX_EXPLORE_ORDERS = 5;
     const visitedSystems = new Set(bots.map(b => b.systemId).filter(Boolean));
     if (ctx.galaxy) {
       for (const sysId of visitedSystems) {
+        if (exploreCount >= MAX_EXPLORE_ORDERS) break;
         const sys = ctx.galaxy.getSystem(sysId!);
         if (!sys) continue;
         for (const connId of sys.connections ?? []) {
+          if (exploreCount >= MAX_EXPLORE_ORDERS) break;
           const neighbor = ctx.galaxy.getSystem(connId);
           if (neighbor && !neighbor.visited) {
             orders.push({
@@ -711,6 +732,7 @@ export class OrderEngine {
               description: `Explore unvisited: ${neighbor.name ?? connId}`,
               priority: PRI.INTEL - 5, reason: "unvisited_system",
             });
+            exploreCount++;
           }
         }
       }
