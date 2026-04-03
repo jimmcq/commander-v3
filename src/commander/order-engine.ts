@@ -784,6 +784,7 @@ export class OrderEngine {
     for (const [itemId, qty] of this.factionInventory) {
       if (qty < 50) continue;
       if (itemId.endsWith("_ore")) continue; // Ores stay for crafting
+      if (DO_NOT_SELL.has(itemId)) continue; // Protected items
       orders.push({
         type: "sell", targetId: itemId,
         description: `Sell ${qty} ${itemId.replace(/_/g, " ")} (standing)`,
