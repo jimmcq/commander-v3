@@ -614,8 +614,10 @@ export class ApiClient {
     return this.mutation("repair");
   }
 
-  async craft(recipeId: string, count?: number): Promise<CraftResult> {
-    const data = await this.mutation<Record<string, unknown>>("craft", { recipe_id: recipeId, count });
+  async craft(recipeId: string, count?: number, opts?: { deliverTo?: "cargo" | "storage" | "faction" }): Promise<CraftResult> {
+    const payload: Record<string, unknown> = { recipe_id: recipeId, count };
+    if (opts?.deliverTo) payload.deliver_to = opts.deliverTo;
+    const data = await this.mutation<Record<string, unknown>>("craft", payload);
     // API returns outputs array: [{item_id, name, quantity, bonus_quantity?}]
     const outputs = data.outputs as Array<Record<string, unknown>> | undefined;
     const firstOutput = outputs?.[0];

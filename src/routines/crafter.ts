@@ -328,7 +328,10 @@ export async function* crafter(ctx: BotContext): AsyncGenerator<RoutineYield, vo
         let remaining = step.batchCount;
         while (remaining > 0) {
           const batch = Math.min(remaining, batchSize);
-          const result = await ctx.api.craft(step.recipeId, batch);
+          // Use deliver_to=faction when in faction storage mode — saves withdraw+deposit round trip
+          const useFaction = ctx.settings.storageMode === "faction_deposit"
+            || ctx.fleetConfig.defaultStorageMode === "faction_deposit";
+          const result = await ctx.api.craft(step.recipeId, batch, useFaction ? { deliverTo: "faction" } : undefined);
           await ctx.refreshState();
           remaining -= batch;
 
