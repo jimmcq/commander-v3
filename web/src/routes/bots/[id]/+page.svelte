@@ -289,6 +289,22 @@
 								<span class="text-chrome-silver">Uptime</span>
 								<span class="text-star-white mono">{Math.floor(bot.uptime / 3600000)}h {Math.floor((bot.uptime % 3600000) / 60000)}m</span>
 							</div>
+							<div class="flex justify-between">
+								<span class="text-chrome-silver">Active %</span>
+								<span class="mono {(bot.uptimePct ?? 0) >= 90 ? 'text-bio-green' : (bot.uptimePct ?? 0) >= 70 ? 'text-warning-yellow' : 'text-claw-red'}">{Math.round(bot.uptimePct ?? 0)}%</span>
+							</div>
+							{#if bot.destination}
+							<div class="flex justify-between">
+								<span class="text-chrome-silver">Destination</span>
+								<span class="text-star-white text-xs">{bot.destination}</span>
+							</div>
+							{/if}
+							{#if bot.jumpsRemaining}
+							<div class="flex justify-between">
+								<span class="text-chrome-silver">Jumps Left</span>
+								<span class="text-star-white mono">{bot.jumpsRemaining}</span>
+							</div>
+							{/if}
 						</div>
 					</div>
 					<div>
