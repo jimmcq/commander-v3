@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { commanderLog, commanderMemory, stuckBots, brainHealth, bots, send, socialChat, socialForum, socialDMs } from "$stores/websocket";
-	import BrainPanel from "$lib/components/BrainPanel.svelte";
+	// BrainPanel removed — LLM deferred to social features later
 
 	let activeTab = $state<"chat" | "dms" | "forum" | "thoughts" | "memory" | "stuck">("chat");
 
@@ -447,8 +447,6 @@
 
 		<!-- Right sidebar -->
 		<div class="space-y-4">
-			<BrainPanel />
-
 			<!-- Social stats -->
 			<div class="card p-4 space-y-2">
 				<h3 class="text-xs font-semibold text-chrome-silver uppercase tracking-wider">Social Activity</h3>

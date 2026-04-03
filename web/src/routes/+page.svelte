@@ -56,6 +56,26 @@
 			.filter(e => e.message.includes("craft") || e.message.includes("Craft"))
 			.slice(0, 5);
 	});
+
+	const sortedBotsByRevenue = $derived.by(() => {
+		return [...$bots]
+			.map(b => ({ ...b, rev: botRevenue24h[b.id] ?? 0 }))
+			.filter(b => b.status === "running" || b.status === "ready")
+			.sort((a, b) => b.rev - a.rev);
+	});
+
+	const routineRevenue = $derived.by(() => {
+		const map = new Map<string, { revenue: number; bots: number }>();
+		for (const bot of $bots) {
+			if (!bot.routine || (bot.status !== "running" && bot.status !== "ready")) continue;
+			const existing = map.get(bot.routine) ?? { revenue: 0, bots: 0 };
+			existing.revenue += (botRevenue24h[bot.id] ?? 0);
+			existing.bots++;
+			map.set(bot.routine, existing);
+		}
+		return [...map.entries()].sort((a, b) => b[1].revenue - a[1].revenue);
+	});
+	const maxRoutineRev = $derived(Math.max(1, ...routineRevenue.map(([,v]) => Math.abs(v.revenue))));
 </script>
 
 <svelte:head>
@@ -116,6 +136,72 @@
 		<div class="card p-4">
 			<div class="h-64">
 				<CreditsChart />
+			</div>
+		</div>
+
+		<!-- Profit Leaderboard + Revenue by Routine -->
+		<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+			<!-- Bot Leaderboard -->
+			<div class="card p-4">
+				<h2 class="text-xs font-semibold text-chrome-silver uppercase tracking-wider mb-3">Bot Leaderboard (24h)</h2>
+				<div class="space-y-1.5">
+					{#each sortedBotsByRevenue.slice(0, 10) as bot, i}
+						{@const maxRev = Math.max(1, Math.abs(sortedBotsByRevenue[0]?.rev ?? 1))}
+						<a href="/bots/{bot.id}" class="flex items-center gap-2 text-xs py-1.5 px-2 rounded hover:bg-deep-void/50 transition-colors">
+							<span class="w-5 text-right font-mono {i === 0 ? 'text-warning-yellow' : i === 1 ? 'text-chrome-silver' : i === 2 ? 'text-shell-orange' : 'text-hull-grey'}">
+								{i < 3 ? ['🥇','🥈','🥉'][i] : `${i+1}.`}
+							</span>
+							<span class="text-star-white flex-1 truncate">{bot.username}</span>
+							<span class="text-[10px] text-hull-grey">{bot.routine ?? "--"}</span>
+							<div class="w-20 h-1.5 bg-deep-void/50 rounded-full overflow-hidden">
+								<div class="h-full rounded-full {bot.rev >= 0 ? 'bg-bio-green/60' : 'bg-claw-red/60'}" style="width: {Math.min(100, (Math.abs(bot.rev) / maxRev) * 100)}%"></div>
+							</div>
+							<span class="w-16 text-right font-mono {bot.rev >= 0 ? 'text-bio-green' : 'text-claw-red'}">
+								{bot.rev >= 0 ? '+' : ''}{bot.rev.toLocaleString()}
+							</span>
+						</a>
+					{/each}
+				</div>
+			</div>
+
+			<!-- Revenue by Routine -->
+			<div class="card p-4">
+				<h2 class="text-xs font-semibold text-chrome-silver uppercase tracking-wider mb-3">Revenue by Routine</h2>
+				<div class="space-y-2">
+					{#each routineRevenue as [routine, data]}
+						<div class="space-y-1">
+							<div class="flex items-center justify-between text-xs">
+								<div class="flex items-center gap-2">
+									<span class="capitalize text-star-white">{routine.replace(/_/g, " ")}</span>
+									<span class="text-hull-grey">{data.bots} bot{data.bots !== 1 ? 's' : ''}</span>
+								</div>
+								<span class="font-mono {data.revenue >= 0 ? 'text-bio-green' : 'text-claw-red'}">
+									{data.revenue >= 0 ? '+' : ''}{data.revenue.toLocaleString()} cr
+								</span>
+							</div>
+							<div class="w-full h-2 bg-deep-void/50 rounded-full overflow-hidden">
+								<div class="h-full rounded-full {data.revenue >= 0 ? 'bg-bio-green/50' : 'bg-claw-red/50'}" style="width: {Math.min(100, (Math.abs(data.revenue) / maxRoutineRev) * 100)}%"></div>
+							</div>
+						</div>
+					{/each}
+				</div>
+
+				{#if $economy}
+				<div class="mt-4 pt-3 border-t border-hull-grey/10 grid grid-cols-3 gap-2 text-center">
+					<div>
+						<div class="text-[10px] text-chrome-silver uppercase">Revenue</div>
+						<div class="text-sm font-mono text-bio-green">+{$economy.totalRevenue24h?.toLocaleString() ?? 0}</div>
+					</div>
+					<div>
+						<div class="text-[10px] text-chrome-silver uppercase">Costs</div>
+						<div class="text-sm font-mono text-claw-red">-{$economy.totalCosts24h?.toLocaleString() ?? 0}</div>
+					</div>
+					<div>
+						<div class="text-[10px] text-chrome-silver uppercase">Net</div>
+						<div class="text-sm font-mono {($economy.netProfit24h ?? 0) >= 0 ? 'text-bio-green' : 'text-claw-red'}">{($economy.netProfit24h ?? 0) >= 0 ? '+' : ''}{$economy.netProfit24h?.toLocaleString() ?? 0}</div>
+					</div>
+				</div>
+				{/if}
 			</div>
 		</div>
 
