@@ -1022,6 +1022,9 @@ export class ScoringBrain implements CommanderBrain {
 
     let bonus = 0;
 
+    // Safety: Bun scope bug can make world undefined even after the null check above
+    if (!world) return 0;
+
     // Galaxy not loaded → boost routines that still work + mild explorer boost
     if (!world.galaxyLoaded) {
       if (routine === "miner") return 15;           // Auto-discovers belts, earns credits
