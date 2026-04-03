@@ -295,7 +295,7 @@ export class OrderEngine {
     this.trimObservations();
 
     const orders: FleetWorkOrder[] = [];
-    const activeBots = fleet.bots.filter(b => b.status === "running" || b.status === "ready");
+    const activeBots = fleet.bots.filter(b => b.status === "running" || b.status === "ready" || b.status === "idle");
 
     // ── TIER 1: EMERGENCY ──
     this.generateEmergencyOrders(activeBots, orders);
@@ -1013,7 +1013,7 @@ export class OrderEngine {
 
   matchAndClaim(fleet: FleetStatus): OrderAssignment[] {
     const assignments: OrderAssignment[] = [];
-    const activeBots = fleet.bots.filter(b => b.status === "running" || b.status === "ready");
+    const activeBots = fleet.bots.filter(b => b.status === "running" || b.status === "ready" || b.status === "idle");
     const PROTECTED_ROUTINES = new Set<string>(["ship_upgrade", "refit", "return_home"]);
 
     // Sort bots: specialists first (fewer matching orders → assign first to avoid starvation)
@@ -1024,11 +1024,6 @@ export class OrderEngine {
     });
 
     for (const bot of sortedBots) {
-      // Debug: track all trader bots
-      if (bot.role === "trader") {
-        console.log(`[OrderEngine] Trader ${bot.username}: status=${bot.status}, routine=${bot.routine ?? "none"}`);
-      }
-
       // Skip bots on protected one-shot routines (already in progress)
       if (bot.routine && bot.status === "running" && PROTECTED_ROUTINES.has(bot.routine)) {
         continue;

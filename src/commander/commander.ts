@@ -266,7 +266,7 @@ export class Commander {
 
     // ── Step 6: Stale claim cleanup ──
     const wom = this.orderEngine.getWorkOrderManager();
-    const activeBotIds = new Set(fleet.bots.filter(b => b.status === "running" || b.status === "ready").map(b => b.botId));
+    const activeBotIds = new Set(fleet.bots.filter(b => b.status === "running" || b.status === "ready" || b.status === "idle").map(b => b.botId));
     wom.cleanupStaleClaims(activeBotIds);
 
     // ── Step 7: Generate orders ──
@@ -285,12 +285,6 @@ export class Commander {
     });
 
     // ── Step 8: Match bots to orders ──
-    // Debug: log trader bots that are in the fleet
-    for (const bot of fleet.bots) {
-      if (bot.role === "trader") {
-        console.log(`[Commander] Trader in fleet: ${bot.username} status=${bot.status} routine=${bot.routine ?? "none"}`);
-      }
-    }
     const assignments = this.orderEngine.matchAndClaim(fleet);
 
     // ── Step 9: Execute assignments ──
