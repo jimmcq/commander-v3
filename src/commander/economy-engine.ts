@@ -954,8 +954,8 @@ export class EconomyEngine {
     }
 
     // Fallback: scan stale stations
-    if (added < deficit && this.staleStations.length > 0) {
-      for (const stationId of this.staleStations.slice(0, 3)) {
+    if (added < deficit && this._staleStations && this._staleStations.length > 0) {
+      for (const stationId of this._staleStations.slice(0, 3)) {
         if (added >= deficit) break;
         const key = `scan:${stationId}`;
         if (existingTargets.has(key)) continue;

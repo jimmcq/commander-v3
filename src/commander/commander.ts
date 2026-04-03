@@ -695,7 +695,15 @@ export class Commander {
 
         // Find best matching order
         const bestOrder = wom.findBestOrder(bot.botId, bot.moduleIds, bot.role ?? undefined, bot.routine);
-        if (!bestOrder) continue; // No matching order — will be handled by fallback
+        if (!bestOrder) {
+          // Debug: log why no order matched (only first unmatched bot per cycle)
+          if (!orderAssignedBots.has("_debug_logged")) {
+            const pending = wom.getPending();
+            console.log(`[Commander] No order for ${bot.botId} (mods=[${bot.moduleIds.join(",")}], role=${bot.role}). ${pending.length} pending orders, ${wom.getUnclaimedCount()} unclaimed`);
+            orderAssignedBots.add("_debug_logged");
+          }
+          continue;
+        }
 
         const claimed = await wom.claim(bestOrder.id, bot.botId);
         if (!claimed) continue;
