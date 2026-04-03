@@ -47,8 +47,8 @@ const PRI = {
 
 /** Tier 1: Strategic — gates facility builds and high-value crafting */
 const STRATEGIC_ORES: Record<string, { minStock: number; reason: string; craftInto?: string; recipe?: string }> = {
-  silicon_ore:    { minStock: 600, reason: "optical fiber → facilities", craftInto: "optical_fiber_bundle", recipe: "spin_optical_fiber" },
-  energy_crystal: { minStock: 400, reason: "optical fiber + circuit boards", craftInto: "optical_fiber_bundle", recipe: "spin_optical_fiber" },
+  silicon_ore:    { minStock: 600, reason: "CRITICAL: optical fiber → Trade Ledger + Intel Terminal", craftInto: "optical_fiber_bundle", recipe: "spin_optical_fiber" },
+  energy_crystal: { minStock: 500, reason: "optical fiber + circuit boards + focused crystals", craftInto: "optical_fiber_bundle", recipe: "spin_optical_fiber" },
 };
 
 /** Tier 2: Supply chain — consumed by crafters for sellable output */
@@ -408,16 +408,24 @@ export class OrderEngine {
       if (stock >= config.minStock) continue;
 
       const deficit = config.minStock - stock;
-      const pri = stock === 0 ? PRI.FACILITY : (stock < 100 ? PRI.SUPPLY_HIGH : PRI.SUPPLY_HIGH - 5);
+      // Silicon gets near-emergency priority — it gates ALL facility builds
+      const isSilicon = oreId === "silicon_ore";
+      const pri = isSilicon
+        ? (stock < 50 ? PRI.MAINTENANCE : PRI.FACILITY) // 90 or 85
+        : (stock === 0 ? PRI.FACILITY : (stock < 100 ? PRI.SUPPLY_HIGH : PRI.SUPPLY_HIGH - 5));
       const nearest = ctx.galaxy.findNearestResourceById?.(oreId, this.config.homeSystem);
 
-      orders.push({
-        type: "mine", targetId: oreId,
-        description: `STRATEGIC: mine ${oreId.replace("_", " ")} (${stock}/${config.minStock}, ${config.reason})`,
-        priority: pri, reason: `strategic: ${config.reason}`,
-        quantity: deficit, requiredModule: "mining_laser",
-        stationId: nearest?.systemId,
-      });
+      // Generate multiple orders for silicon so multiple miners can claim
+      const orderCount = isSilicon && stock < 300 ? 3 : 1;
+      for (let i = 0; i < orderCount; i++) {
+        orders.push({
+          type: "mine", targetId: oreId,
+          description: `STRATEGIC: mine ${oreId.replace("_", " ")} (${stock}/${config.minStock}, ${config.reason})`,
+          priority: pri - i, reason: `strategic: ${config.reason}`,
+          quantity: deficit, requiredModule: "mining_laser",
+          stationId: nearest?.systemId,
+        });
+      }
     }
 
     // ── TIER 2: SUPPLY CHAIN ORES (pri 65-75) — feed crafters ──
@@ -498,8 +506,8 @@ export class OrderEngine {
       const canCraft = Math.min(Math.floor(silicon / 3), Math.floor(energyCrystal / 2), opticalFiberNeeded);
       orders.push({
         type: "craft", targetId: "spin_optical_fiber",
-        description: `STRATEGIC: craft ${canCraft} optical fiber (${opticalFiber}/${opticalFiber + opticalFiberNeeded} for facilities)`,
-        priority: PRI.FACILITY, reason: "facility: optical fiber",
+        description: `CRITICAL: craft ${canCraft} optical fiber (${opticalFiber}/${opticalFiber + opticalFiberNeeded} for Trade Ledger)`,
+        priority: PRI.MAINTENANCE, reason: "facility: optical fiber → Trade Ledger",
         quantity: Math.min(canCraft, 10),
       });
     }
