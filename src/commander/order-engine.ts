@@ -865,7 +865,7 @@ export class OrderEngine {
       orders.push({
         type: "sell", targetId: itemId,
         description: `Sell ${qty} ${itemId.replace(/_/g, " ")} (standing)`,
-        priority: PRI.STANDING + 5, reason: "standing_sell",
+        priority: PRI.STANDING, reason: "standing_sell",
         quantity: qty,
         stationId: this.config.factionStorageStation ?? this.config.homeBase,
       });
@@ -879,7 +879,7 @@ export class OrderEngine {
       orders.push({
         type: "trade", targetId: "scan_and_sell",
         description: `Trade run to ${stationId.replace(/_/g, " ")} (sell + scan + buy return)`,
-        priority: PRI.STANDING + 8, reason: "standing_trade_run",
+        priority: PRI.TRADE, reason: "standing_trade_run",
         stationId,
         fromStationId: homeStation,
       });
