@@ -175,7 +175,8 @@ export class ScoringBrain implements CommanderBrain {
    * 4. Respect cooldowns and thresholds
    */
   async evaluate(input: EvaluationInput): Promise<EvaluationOutput> {
-    const { fleet, goals, economy, world, tick } = input;
+    const { fleet, goals, economy, tick } = input;
+    const world = input.world ?? undefined; // Gracefully handle missing world context
     const startTime = Date.now();
     const now = startTime;
 

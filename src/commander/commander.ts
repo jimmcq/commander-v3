@@ -263,7 +263,16 @@ export class Commander {
         return;
       }
       this.evaluateAndAssign().catch((err) => {
-        console.error("[Commander] Evaluation error:", err);
+        const msg = err instanceof Error ? err.message : String(err);
+        // world scope bug — retry without world-dependent features
+        if (msg.includes("world is not defined")) {
+          this._world = null as any;
+          this.evaluateAndAssign().catch((err2) => {
+            console.error("[Commander] Evaluation error (retry):", err2);
+          });
+        } else {
+          console.error("[Commander] Evaluation error:", err);
+        }
       });
     }, this.config.evaluationIntervalSec * 1000);
 
@@ -603,8 +612,12 @@ export class Commander {
     // Step 2: Analyze economy
     const economySnapshot = this.economy.analyze(fleet);
 
-    // Step 3: Build world context — use this._world everywhere (Bun scope bug)
-    this._world = this.buildWorldContext(fleet);
+    // Step 3: Build world context — wrapped in try/catch for Bun scope safety
+    try {
+      this._world = this.buildWorldContext(fleet);
+    } catch {
+      this._world = { systemPois: new Map(), freshStationIds: [], staleStationIds: [], hasAnyMarketData: false, tradeRouteCount: 0, bestTradeProfit: 0, galaxyLoaded: false, dataFreshnessRatio: 0, demandInsightCount: 0 } as any;
+    }
 
     // Step 3.5: Track performance outcomes (for LLM feedback)
     this.performanceTracker.update(fleet);
