@@ -43,6 +43,32 @@ const PRI = {
   FALLBACK: 15,
 } as const;
 
+// ── Strategic Material Classification ──
+
+/** Tier 1: Strategic — gates facility builds and high-value crafting */
+const STRATEGIC_ORES: Record<string, { minStock: number; reason: string; craftInto?: string; recipe?: string }> = {
+  silicon_ore:    { minStock: 600, reason: "optical fiber → facilities", craftInto: "optical_fiber_bundle", recipe: "spin_optical_fiber" },
+  energy_crystal: { minStock: 400, reason: "optical fiber + circuit boards", craftInto: "optical_fiber_bundle", recipe: "spin_optical_fiber" },
+};
+
+/** Tier 2: Supply chain — consumed by crafters for sellable output */
+const SUPPLY_CHAIN_ORES: Record<string, { minStock: number; craftInto: string; recipe: string; sellValue: number }> = {
+  iron_ore:     { minStock: 2000, craftInto: "steel_plate", recipe: "smelt_steel", sellValue: 45 },
+  copper_ore:   { minStock: 1000, craftInto: "copper_wiring", recipe: "draw_copper_wire", sellValue: 38 },
+  titanium_ore: { minStock: 500, craftInto: "titanium_alloy", recipe: "refine_titanium", sellValue: 120 },
+};
+
+/** Tier 3: Revenue — high value ores sold directly */
+const REVENUE_ORES: Record<string, { minStock: number; sellValue: number }> = {
+  gold_ore:     { minStock: 200, sellValue: 45 },
+  platinum_ore: { minStock: 200, sellValue: 35 },
+  palladium_ore: { minStock: 100, sellValue: 50 },
+};
+
+/** Tier 4: Bulk — low value, don't mine unless actually needed */
+const BULK_ORES = new Set(["nickel_ore", "carbon_ore", "aluminum_ore", "vanadium_ore", "iridium_ore", "tungsten_ore"]);
+const BULK_MIN_STOCK = 5000; // Only mine if below this
+
 /** Market insight cache TTL */
 const INSIGHT_TTL_MS = 2 * 60 * 60 * 1000; // 2 hours
 /** Trade intel cache TTL */
@@ -370,61 +396,79 @@ export class OrderEngine {
   // ── Tier 4: Supply Chain (mine orders from demand) ──
 
   private generateSupplyOrders(bots: FleetBotInfo[], ctx: OrderContext, orders: FleetWorkOrder[]): void {
-    // ── 1. Stock target deficits (from config) ──
-    for (const target of this.stockTargets) {
-      const current = this.factionInventory.get(target.item_id) ?? 0;
-      if (current < target.min_stock) {
-        const deficit = target.min_stock - current;
-        const isOre = target.item_id.endsWith("_ore") || target.item_id.includes("crystal");
-        if (isOre) {
-          orders.push({
-            type: "mine", targetId: target.item_id,
-            description: `Mine ${deficit} ${target.item_id} (stock target)`,
-            priority: PRI.SUPPLY_HIGH, reason: "stock_target",
-            quantity: deficit, requiredModule: "mining_laser",
-          });
-        }
-      }
+    // ═══════════════════════════════════════════════════════
+    // HYBRID VALUE-CHAIN + STORAGE-DRIVEN SUPPLY ORDERS
+    // Pipeline: mine ore → craft refined → sell output
+    // Each tier triggers the next when materials are available
+    // ═══════════════════════════════════════════════════════
+
+    // ── TIER 1: STRATEGIC ORES (pri 80-85) — gate facility builds ──
+    for (const [oreId, config] of Object.entries(STRATEGIC_ORES)) {
+      const stock = this.factionInventory.get(oreId) ?? 0;
+      if (stock >= config.minStock) continue;
+
+      const deficit = config.minStock - stock;
+      const pri = stock === 0 ? PRI.FACILITY : (stock < 100 ? PRI.SUPPLY_HIGH : PRI.SUPPLY_HIGH - 5);
+      const nearest = ctx.galaxy.findNearestResourceById?.(oreId, this.config.homeSystem);
+
+      orders.push({
+        type: "mine", targetId: oreId,
+        description: `STRATEGIC: mine ${oreId.replace("_", " ")} (${stock}/${config.minStock}, ${config.reason})`,
+        priority: pri, reason: `strategic: ${config.reason}`,
+        quantity: deficit, requiredModule: "mining_laser",
+        stationId: nearest?.systemId,
+      });
     }
 
-    // ── 2. Auto-detect supply needs from faction storage state ──
-    // LOW ores (< 500 units) → mine more
-    const LOW_ORE_THRESHOLD = 500;
-    const oreTypes = ["iron_ore", "copper_ore", "silicon_ore", "titanium_ore", "gold_ore", "platinum_ore"];
-    for (const ore of oreTypes) {
-      const stock = this.factionInventory.get(ore) ?? 0;
-      if (stock < LOW_ORE_THRESHOLD) {
-        const pri = stock === 0 ? PRI.SUPPLY_HIGH : (stock < 100 ? PRI.SUPPLY_MED : PRI.SUPPLY_MED - 5);
-        const nearestResource = ctx.galaxy.findNearestResourceById?.(ore, this.config.homeSystem);
-        orders.push({
-          type: "mine", targetId: ore,
-          description: `Mine ${ore.replace("_ore", "")} (${stock} in storage, need ${LOW_ORE_THRESHOLD})`,
-          priority: pri, reason: stock === 0 ? "zero_stock" : "low_stock",
-          quantity: LOW_ORE_THRESHOLD - stock, requiredModule: "mining_laser",
-          stationId: nearestResource?.systemId,
-        });
-      }
+    // ── TIER 2: SUPPLY CHAIN ORES (pri 65-75) — feed crafters ──
+    for (const [oreId, config] of Object.entries(SUPPLY_CHAIN_ORES)) {
+      const stock = this.factionInventory.get(oreId) ?? 0;
+      if (stock >= config.minStock) continue;
+
+      const deficit = config.minStock - stock;
+      const pri = stock === 0 ? PRI.SUPPLY_MED + 5 : (stock < config.minStock * 0.3 ? PRI.SUPPLY_MED : PRI.SUPPLY_MED - 5);
+      const nearest = ctx.galaxy.findNearestResourceById?.(oreId, this.config.homeSystem);
+
+      orders.push({
+        type: "mine", targetId: oreId,
+        description: `Supply: mine ${oreId.replace("_", " ")} (${stock}/${config.minStock}, → ${config.craftInto})`,
+        priority: pri, reason: `supply_chain: ${config.craftInto}`,
+        quantity: deficit, requiredModule: "mining_laser",
+        stationId: nearest?.systemId,
+      });
     }
 
-    // ── 3. Observed consumption outpacing production ──
-    const consumptionRates = this.getAggregateRates("consumption");
-    const productionRates = this.getAggregateRates("production");
-    for (const [itemId, consumeRate] of consumptionRates) {
-      const produceRate = productionRates.get(itemId) ?? 0;
-      if (consumeRate > produceRate * 1.2) {
-        const isOre = itemId.endsWith("_ore") || itemId.includes("crystal") || itemId.includes("gas") || itemId.includes("ice");
-        if (!isOre) continue;
-        const shortfall = Math.ceil((consumeRate - produceRate) * 2);
-        orders.push({
-          type: "mine", targetId: itemId,
-          description: `Mine ${itemId} (consumption > production)`,
-          priority: PRI.SUPPLY_MED - 5, reason: "consumption_deficit",
-          quantity: shortfall, requiredModule: "mining_laser",
-        });
-      }
+    // ── TIER 3: REVENUE ORES (pri 50-60) — sell directly ──
+    for (const [oreId, config] of Object.entries(REVENUE_ORES)) {
+      const stock = this.factionInventory.get(oreId) ?? 0;
+      if (stock >= config.minStock) continue;
+
+      const nearest = ctx.galaxy.findNearestResourceById?.(oreId, this.config.homeSystem);
+      orders.push({
+        type: "mine", targetId: oreId,
+        description: `Revenue: mine ${oreId.replace("_", " ")} (${config.sellValue}cr/unit, ${stock} in stock)`,
+        priority: PRI.TRADE + 5, reason: `revenue: ${config.sellValue}cr/unit`,
+        quantity: config.minStock - stock, requiredModule: "mining_laser",
+        stationId: nearest?.systemId,
+      });
     }
 
-    // ── 4. Consumable supplies: fuel cells, repair kits ──
+    // ── TIER 4: BULK ORES (pri 25) — only if actually low ──
+    for (const oreId of BULK_ORES) {
+      const stock = this.factionInventory.get(oreId) ?? 0;
+      if (stock >= BULK_MIN_STOCK) continue;
+      // Only generate if stock is very low (< 1000) — we have 40-100K of most bulk ores
+      if (stock >= 1000) continue;
+
+      orders.push({
+        type: "mine", targetId: oreId,
+        description: `Bulk: mine ${oreId.replace("_", " ")} (${stock} in stock)`,
+        priority: PRI.STANDING, reason: "bulk_low",
+        quantity: BULK_MIN_STOCK - stock, requiredModule: "mining_laser",
+      });
+    }
+
+    // ── CONSUMABLES: fuel cells, repair kits ──
     const fuelCells = this.factionInventory.get("fuel_cell") ?? 0;
     if (fuelCells < 100) {
       orders.push({
@@ -438,9 +482,57 @@ export class OrderEngine {
   // ── Tier 5: Craft ──
 
   private generateCraftOrders(ctx: OrderContext, orders: FleetWorkOrder[]): void {
-    // Find recipes where we have inputs and output has demand
-    // Find recipes where we have inputs in faction storage
-    // Simple approach: check each stock target's recipe
+    // ═══════════════════════════════════════════════════════
+    // CRAFT ORDERS — triggered by having available ore inputs
+    // Priority: facility materials > supply chain > general
+    // Rule: only craft if ALL inputs available (no speculative buys)
+    // ═══════════════════════════════════════════════════════
+
+    // ── 1. STRATEGIC CRAFTING (pri 82-85) — facility build materials ──
+    const silicon = this.factionInventory.get("silicon_ore") ?? 0;
+    const energyCrystal = this.factionInventory.get("energy_crystal") ?? 0;
+    const opticalFiber = this.factionInventory.get("optical_fiber_bundle") ?? 0;
+    const opticalFiberNeeded = (this.facilityMaterialNeeds.get("optical_fiber_bundle") ?? 200) - opticalFiber;
+
+    if (opticalFiberNeeded > 0 && silicon >= 3 && energyCrystal >= 2) {
+      const canCraft = Math.min(Math.floor(silicon / 3), Math.floor(energyCrystal / 2), opticalFiberNeeded);
+      orders.push({
+        type: "craft", targetId: "spin_optical_fiber",
+        description: `STRATEGIC: craft ${canCraft} optical fiber (${opticalFiber}/${opticalFiber + opticalFiberNeeded} for facilities)`,
+        priority: PRI.FACILITY, reason: "facility: optical fiber",
+        quantity: Math.min(canCraft, 10),
+      });
+    }
+
+    const circuitBoards = this.factionInventory.get("circuit_board") ?? 0;
+    const circuitBoardsNeeded = (this.facilityMaterialNeeds.get("circuit_board") ?? 350) - circuitBoards;
+    if (circuitBoardsNeeded > 0) {
+      orders.push({
+        type: "craft", targetId: "assemble_circuit_board",
+        description: `STRATEGIC: craft circuit boards (${circuitBoards}, need ${circuitBoards + circuitBoardsNeeded} for facilities)`,
+        priority: PRI.FACILITY - 2, reason: "facility: circuit boards",
+        quantity: Math.min(10, circuitBoardsNeeded),
+      });
+    }
+
+    // ── 2. SUPPLY CHAIN CRAFTING (pri 68-72) — ore surplus → refined goods ──
+    for (const [oreId, config] of Object.entries(SUPPLY_CHAIN_ORES)) {
+      const oreStock = this.factionInventory.get(oreId) ?? 0;
+      const outputStock = this.factionInventory.get(config.craftInto) ?? 0;
+      // Only craft if we have surplus ore AND output isn't piling up
+      if (oreStock > config.minStock * 0.5 && outputStock < 500) {
+        const batchSize = Math.min(10, Math.floor(oreStock / 5));
+        if (batchSize <= 0) continue;
+        orders.push({
+          type: "craft", targetId: config.recipe,
+          description: `Craft ${config.craftInto} (${oreStock} ${oreId} → ${config.sellValue}cr/unit)`,
+          priority: PRI.CRAFT, reason: `supply_chain: ${config.sellValue}cr/unit`,
+          quantity: batchSize,
+        });
+      }
+    }
+
+    // ── 3. GENERAL CRAFTING — from stock targets (original logic) ──
     const craftableRecipes: Array<{ id: string; outputId: string; maxBatch?: number }> = [];
     for (const target of this.stockTargets) {
       const recipes = ctx.crafting.findRecipesForItem(target.item_id);
