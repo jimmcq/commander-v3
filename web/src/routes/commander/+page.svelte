@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { commanderLog, activityLog, bots, send, goals, workOrders } from "$stores/websocket";
+	import { commanderLog, activityLog, bots, send, goals, workOrders, completedOrders } from "$stores/websocket";
 
 	/** Unified timeline entry for the conversational log */
 	interface TimelineEntry {
@@ -190,6 +190,28 @@
 							<span class="w-2 h-2 rounded-full bg-hull-grey/40 animate-pulse" title="Unclaimed"></span>
 						{/if}
 					</div>
+				</div>
+			{/each}
+		</div>
+	</div>
+	{/if}
+
+	<!-- Completed Orders -->
+	{#if $completedOrders.length > 0}
+	<div class="card p-4">
+		<h3 class="text-sm font-semibold text-star-white uppercase tracking-wider mb-3">Recently Completed</h3>
+		<div class="space-y-1 max-h-[200px] overflow-y-auto">
+			{#each $completedOrders as order}
+				{@const ago = Math.round((Date.now() - order.completedAt) / 60_000)}
+				{@const colors = TYPE_COLORS[order.type] ?? { text: "text-hull-grey", bg: "bg-hull-grey/10 border-hull-grey/20" }}
+				<div class="flex items-center gap-2 text-xs py-1 px-2 rounded bg-bio-green/5 border border-bio-green/10">
+					<span class="text-bio-green">✓</span>
+					<span class="text-[10px] font-bold uppercase {colors.text}">{order.type}</span>
+					<span class="text-chrome-silver flex-1 truncate">{order.description}</span>
+					{#if order.botId}
+						<span class="text-hull-grey">{order.botId.split("-").pop()}</span>
+					{/if}
+					<span class="text-hull-grey text-[10px]">{ago}m ago</span>
 				</div>
 			{/each}
 		</div>

@@ -149,7 +149,7 @@ export interface OpenOrder {
 }
 
 export interface WorkOrderInfo {
-  type: "mine" | "craft" | "trade" | "explore";
+  type: "mine" | "craft" | "trade" | "explore" | "sell" | "buy" | "scan" | "deliver";
   targetId: string;
   description: string;
   priority: number;
@@ -157,6 +157,13 @@ export interface WorkOrderInfo {
   quantity?: number;
   /** Bot currently working on this order (matched by routine type) */
   assignedBot?: string | null;
+}
+
+export interface CompletedOrderInfo {
+  description: string;
+  type: string;
+  completedAt: number;
+  botId: string | null;
 }
 
 export interface EconomyState {

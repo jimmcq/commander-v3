@@ -73,6 +73,7 @@ export const socialForum = writable<SocialForumThread[]>([]);
 export const socialDMs = writable<SocialDM[]>([]);
 export const brainDecisionStats = writable<BrainDecisionStats | null>(null);
 export const workOrders = writable<WorkOrderInfo[]>([]);
+export const completedOrders = writable<Array<{ description: string; type: string; completedAt: number; botId: string | null }>>([]);
 
 // Galaxy detail (enriched with market data)
 export interface GalaxyDetailData {
@@ -151,6 +152,9 @@ function handleMessage(event: MessageEvent) {
         economy.set(msg.economy);
         if (msg.economy.workOrders) {
           workOrders.set(msg.economy.workOrders);
+        }
+        if ((msg.economy as any).completedOrders) {
+          completedOrders.set((msg.economy as any).completedOrders);
         }
         break;
 

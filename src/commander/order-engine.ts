@@ -184,6 +184,10 @@ export class OrderEngine {
   // Galaxy reference for distance calculations (set during generate())
   private _galaxy: Galaxy | null = null;
 
+  // Recently completed orders (rolling buffer for dashboard)
+  private _completedOrders: Array<{ description: string; type: string; completedAt: number; botId: string | null }> = [];
+  private readonly MAX_COMPLETED = 20;
+
   constructor(config: OrderEngineConfig, wom: WorkOrderManager) {
     this.config = config;
     this.wom = wom;
@@ -267,6 +271,17 @@ export class OrderEngine {
 
   /** Get all cached market insights (for dashboard) */
   getMarketInsights(): CachedInsight[] { return [...this.marketInsights.values()]; }
+
+  /** Record a completed order (called when routines finish work) */
+  recordCompletion(description: string, type: string, botId: string | null): void {
+    this._completedOrders.unshift({ description, type, completedAt: Date.now(), botId });
+    if (this._completedOrders.length > this.MAX_COMPLETED) this._completedOrders.pop();
+  }
+
+  /** Get recently completed orders (for dashboard) */
+  getCompletedOrders(): Array<{ description: string; type: string; completedAt: number; botId: string | null }> {
+    return this._completedOrders;
+  }
 
   // ══════════════════════════════════════════════════════════
   //  ORDER GENERATION — called each eval cycle by Commander

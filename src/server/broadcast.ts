@@ -433,15 +433,16 @@ export function startBroadcastLoop(deps: BroadcastDeps): () => void {
             totalRevenue24h: cached24hTotals.revenue,
             totalCosts24h: cached24hTotals.cost,
             netProfit24h: cached24hTotals.profit,
-            workOrders: snap.workOrders.map(wo => ({
+            workOrders: snap.workOrders.map((wo: any) => ({
               type: wo.type,
               targetId: wo.targetId,
               description: wo.description,
               priority: wo.priority,
               reason: wo.reason,
               quantity: wo.quantity,
-              assignedBot: routineBotMap.get(workOrderTypeToRoutine[wo.type] ?? "") ?? null,
+              assignedBot: wo.claimedBy ?? routineBotMap.get(workOrderTypeToRoutine[wo.type] ?? "") ?? null,
             })),
+            completedOrders: orderEngine.getCompletedOrders(),
           },
         });
       }
