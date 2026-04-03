@@ -262,17 +262,23 @@ export class Commander {
         console.log("[Commander] Skipping eval — previous cycle still running");
         return;
       }
-      this.evaluateAndAssign().catch((err) => {
+      this.evaluateAndAssign().catch(async (err) => {
         const msg = err instanceof Error ? err.message : String(err);
-        // world scope bug — retry without world-dependent features
-        if (msg.includes("world is not defined")) {
-          this._world = null as any;
-          this.evaluateAndAssign().catch((err2) => {
-            console.error("[Commander] Evaluation error (retry):", err2);
-          });
-        } else {
-          console.error("[Commander] Evaluation error:", err);
-        }
+        console.error("[Commander] Evaluation error:", msg);
+
+        // Emergency fallback: assign ALL idle bots to miner via work orders or direct
+        try {
+          const fleet = this.deps.getFleetStatus();
+          const idle = fleet.bots.filter(b =>
+            (b.status === "ready" || (b.status === "running" && !b.routine))
+          );
+          for (const bot of idle) {
+            try {
+              await this.deps.assignRoutine(bot.botId, "miner", {});
+            } catch { /* last resort */ }
+          }
+          if (idle.length > 0) console.log(`[Commander] Emergency: assigned ${idle.length} idle bot(s) to miner`);
+        } catch { /* truly broken */ }
       });
     }, this.config.evaluationIntervalSec * 1000);
 
@@ -609,14 +615,32 @@ export class Commander {
       });
     }
 
+    // Step 1.9: Clean up stale work order claims (Phase 7)
+    if (this.deps.workOrderManager) {
+      const activeBotIds = new Set(fleet.bots.filter(b => b.status === "running" || b.status === "ready").map(b => b.botId));
+      this.deps.workOrderManager.cleanupStaleClaims(activeBotIds);
+    }
+
     // Step 2: Analyze economy
+    this.economy._fleetSize = fleet.bots.length;
     const economySnapshot = this.economy.analyze(fleet);
 
-    // Step 3: Build world context — wrapped in try/catch for Bun scope safety
-    try {
-      this._world = this.buildWorldContext(fleet);
-    } catch {
-      this._world = { systemPois: new Map(), freshStationIds: [], staleStationIds: [], hasAnyMarketData: false, tradeRouteCount: 0, bestTradeProfit: 0, galaxyLoaded: false, dataFreshnessRatio: 0, demandInsightCount: 0 } as any;
+    // Step 2.5: Sync work orders into WOM from economy engine (Phase 1)
+    // This was only in broadcast.ts before — orders were stale when commander ran
+    if (this.deps.workOrderManager) {
+      this.deps.workOrderManager.syncFromEconomy(economySnapshot.workOrders);
+      this.economy.generateChains();
+    }
+
+    // Step 3: Build world context — lazy, cached every 5 ticks (Phase 6)
+    if (this.tick % 5 === 0 || !this._world) {
+      try {
+        this._world = this.buildWorldContext(fleet);
+      } catch {
+        if (!this._world) {
+          this._world = { systemPois: new Map(), freshStationIds: [], staleStationIds: [], hasAnyMarketData: false, tradeRouteCount: 0, bestTradeProfit: 0, galaxyLoaded: false, dataFreshnessRatio: 0, demandInsightCount: 0 } as any;
+        }
+      }
     }
 
     // Step 3.5: Track performance outcomes (for LLM feedback)
@@ -630,82 +654,124 @@ export class Commander {
       }
     }
 
-    // Step 3.8: Fleet health monitoring (runs in separate scope to avoid Bun scope bugs)
+    // Step 3.8: Fleet health monitoring
     this.runFleetHealth(fleet);
 
-    // Step 3.9: Pre-evaluation emergency overrides — clear cooldowns BEFORE brain runs
+    // Step 3.9: Pre-evaluation emergency overrides
     this.applyEmergencyOverrides(fleet);
 
-    // Step 3.10: Work-order-first assignment — match bots to orders before scoring brain
-    // Bots assigned here are excluded from scoring brain evaluation
+    // ══════════════════════════════════════════════════════════════
+    // Step 4: ORDER-DRIVEN ASSIGNMENT (Phases 3+4)
+    // ALL bots claim work orders. Scoring brain is fallback only.
+    // ══════════════════════════════════════════════════════════════
     const orderAssignedBots = new Set<string>();
+    const PROTECTED_ROUTINES = new Set(["ship_upgrade", "refit", "return_home"]);
+
     if (this.deps.workOrderManager) {
       const wom = this.deps.workOrderManager;
-      for (const bot of fleet.bots) {
-        if (bot.status !== "running" && bot.status !== "ready") continue;
-        if (orderAssignedBots.size >= fleet.bots.length - 2) break; // Keep 2 bots for scoring brain fallback
 
-        // Skip bots already on a work order
+      // Sort bots: specialists first (fewer matching orders), then generalists
+      const sortedBots = [...fleet.bots]
+        .filter(b => b.status === "running" || b.status === "ready")
+        .sort((a, b) => {
+          if (a.role && !b.role) return -1;
+          if (!a.role && b.role) return 1;
+          return 0;
+        });
+
+      for (const bot of sortedBots) {
+        // Skip bots on protected one-shot routines
+        if (bot.routine && bot.status === "running" && PROTECTED_ROUTINES.has(bot.routine)) {
+          orderAssignedBots.add(bot.botId);
+          continue;
+        }
+
+        // Skip bots already on an active work order
         const existingOrders = wom.getForBot(bot.botId);
-        if (existingOrders.some(o => o.status === "claimed" || o.status === "in_progress")) continue;
+        if (existingOrders.some(o => o.status === "claimed" || o.status === "in_progress")) {
+          orderAssignedBots.add(bot.botId);
+          continue;
+        }
 
-        // Find best matching order for this bot
-        const bestOrder = wom.findBestOrder(
-          bot.botId,
-          bot.moduleIds,
-          bot.role ?? undefined,
-          bot.routine,
-        );
-        if (!bestOrder) continue;
+        // Find best matching order
+        const bestOrder = wom.findBestOrder(bot.botId, bot.moduleIds, bot.role ?? undefined, bot.routine);
+        if (!bestOrder) continue; // No matching order — will be handled by fallback
 
-        // Claim it
         const claimed = await wom.claim(bestOrder.id, bot.botId);
         if (!claimed) continue;
 
         const routine = wom.getRoutineForOrder(claimed);
         const params = wom.getParamsForOrder(claimed);
 
-        // Assign the bot to this routine with order params
+        // Don't reassign bot already running the matching routine
+        if (bot.routine === routine && bot.status === "running") {
+          wom.release(claimed.id);
+          orderAssignedBots.add(bot.botId);
+          continue;
+        }
+
         try {
           await this.deps.assignRoutine(bot.botId, routine, params);
           this.brain.clearCooldown(bot.botId);
           orderAssignedBots.add(bot.botId);
-          console.log(`[Commander] Order: ${bot.botId} → ${routine} (${claimed.description}, priority ${claimed.priority}${claimed.chainId ? ", chain" : ""})`);
+          console.log(`[Commander] Order: ${bot.botId} → ${routine} (${claimed.description}, pri=${claimed.priority}${claimed.chainId ? " chain" : ""})`);
         } catch {
-          wom.release(claimed.id); // Release if assignment failed
+          wom.release(claimed.id);
         }
       }
     }
 
-    // Step 4: Run scoring brain for remaining bots (ALWAYS — fast, deterministic, <50ms)
-    const performanceContext = this.performanceTracker.buildContextBlock();
-    const memoryContext = this.deps.memoryStore?.buildContextBlock() ?? "";
-    const chatContext = this._chatIntelligence?.buildContextBlock() ?? "";
-    const extraContext = [performanceContext, memoryContext, chatContext].filter(Boolean).join("\n\n");
+    // Step 4.5: FALLBACK — scoring brain assigns ONLY unmatched bots (Phase 4)
+    const unmatchedBots = fleet.bots.filter(
+      b => !orderAssignedBots.has(b.botId) && (b.status === "running" || b.status === "ready")
+    );
 
-    // Exclude order-assigned bots from scoring brain — they already have work
-    const remainingFleet: FleetStatus = orderAssignedBots.size > 0
-      ? { ...fleet, bots: fleet.bots.filter(b => !orderAssignedBots.has(b.botId)), activeBots: fleet.activeBots - orderAssignedBots.size, totalCredits: fleet.totalCredits }
-      : fleet;
-
-    const evalInput = {
-      fleet: remainingFleet,
-      goals: this.goals,
-      economy: economySnapshot,
-      world: this._world,
-      tick: this.tick,
-      extraContext: extraContext || undefined,
-    };
-
-    // Scoring brain assigns remaining (non-order) bots
-    const scoringBrain = this.getScoringBrain();
     let output: EvaluationOutput;
 
-    if (scoringBrain) {
-      output = await scoringBrain.evaluate(evalInput);
+    if (unmatchedBots.length > 0) {
+      if (unmatchedBots.length > 0) {
+        console.log(`[Commander] ${unmatchedBots.length} bot(s) unmatched — fallback scoring`);
+      }
+
+      const fallbackFleet: FleetStatus = {
+        ...fleet,
+        bots: unmatchedBots,
+        activeBots: unmatchedBots.length,
+        totalCredits: fleet.totalCredits,
+      };
+
+      try {
+        const scoringBrain = this.getScoringBrain();
+        if (scoringBrain) {
+          output = await scoringBrain.evaluate({
+            fleet: fallbackFleet,
+            goals: this.goals,
+            economy: economySnapshot,
+            world: this._world,
+            tick: this.tick,
+          });
+        } else {
+          output = await this.brain.evaluate({
+            fleet: fallbackFleet,
+            goals: this.goals,
+            economy: economySnapshot,
+            world: this._world,
+            tick: this.tick,
+          });
+        }
+      } catch (err) {
+        // Scoring brain crashed — assign ALL unmatched bots to miner fallback
+        const errMsg = err instanceof Error ? err.message : String(err);
+        console.warn(`[Commander] Scoring brain failed: ${errMsg}. Assigning ${unmatchedBots.length} bot(s) to miner.`);
+        const minerAssignments: Assignment[] = unmatchedBots.map(b => ({
+          botId: b.botId, routine: "miner" as any, params: {}, score: 0,
+          reasoning: "miner fallback (scoring brain crashed)", previousRoutine: b.routine,
+        }));
+        output = { assignments: minerAssignments, reasoning: "miner fallback", brainName: "fallback", latencyMs: 0, confidence: 0.5 };
+      }
     } else {
-      // Fallback: use whatever brain is configured (shouldn't happen normally)
-      output = await this.brain.evaluate(evalInput);
+      // All bots matched by orders — no scoring brain needed
+      output = { assignments: [], reasoning: "all bots matched by work orders", brainName: "order-driven", latencyMs: 0, confidence: 1.0 };
     }
 
     // Step 4.5: Check strategic triggers — should we consult the LLM?
@@ -766,7 +832,7 @@ export class Commander {
     const executedAssignments: FleetAssignment[] = [];
     const botStatusMap = new Map(fleet.bots.map((b) => [b.botId, b]));
     // One-shot routines must not be interrupted mid-execution
-    const PROTECTED_ROUTINES = new Set(["ship_upgrade", "refit", "return_home", "scout"]);
+    const EXEC_PROTECTED = new Set(["ship_upgrade", "refit", "return_home", "scout"]);
 
     for (const assignment of cappedAssignments) {
       // Skip bots already assigned by work order system (they take priority)
@@ -782,7 +848,7 @@ export class Commander {
         continue; // Already doing this — don't interrupt
       }
       // Don't interrupt one-shot routines (ship_upgrade, refit, return_home)
-      if (botInfo && botInfo.status === "running" && botInfo.routine && PROTECTED_ROUTINES.has(botInfo.routine)) {
+      if (botInfo && botInfo.status === "running" && botInfo.routine && EXEC_PROTECTED.has(botInfo.routine)) {
         continue;
       }
 

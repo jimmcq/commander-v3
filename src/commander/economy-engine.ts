@@ -62,6 +62,9 @@ export class EconomyEngine {
   /** Track which chains we've already created (prevent duplicates) */
   private createdChains = new Set<string>();
 
+  /** Fleet size for order generation (set by commander each eval) */
+  _fleetSize = 15;
+
   /** Pending ship upgrades from Commander (for ship upgrade chains) */
   pendingShipUpgrades: Array<{
     botId: string; shipClass: string; price: number;
@@ -903,9 +906,92 @@ export class EconomyEngine {
       }
     }
 
+    // Phase 2: Ensure enough orders for all bots (fallback orders)
+    this.ensureMinimumOrders(orders);
+
     // Sort by priority descending
     orders.sort((a, b) => b.priority - a.priority);
     return orders;
+  }
+
+  /**
+   * Guarantee enough work orders for all bots.
+   * If not enough orders exist, generate fallback mining/scouting orders.
+   * This prevents bots from sitting idle when the economy engine
+   * doesn't detect specific deficits/surpluses.
+   */
+  private ensureMinimumOrders(orders: FleetWorkOrder[]): void {
+    const needed = Math.ceil(this._fleetSize * 1.5); // ~22 for 15 bots
+    if (orders.length >= needed) return;
+
+    const deficit = needed - orders.length;
+    const existingTargets = new Set(orders.map(o => `${o.type}:${o.targetId}`));
+
+    // Common ores for fallback mining
+    const FALLBACK_ORES = [
+      "iron_ore", "copper_ore", "silicon_ore", "carbon_ore", "nickel_ore",
+      "aluminum_ore", "titanium_ore", "tungsten_ore", "lithium_ore",
+    ];
+
+    let added = 0;
+    // Fallback: mine common ores (always productive)
+    for (const ore of FALLBACK_ORES) {
+      if (added >= deficit) break;
+      const key = `mine:${ore}`;
+      if (existingTargets.has(key)) continue;
+      orders.push({
+        type: "mine",
+        targetId: ore,
+        description: `Mine ${ore.replace(/_/g, " ")} (keep bots active)`,
+        priority: 20,
+        reason: "fallback: keep bots active",
+        quantity: 50,
+        requiredModule: "mining_laser",
+        routineHint: "miner",
+      });
+      existingTargets.add(key);
+      added++;
+    }
+
+    // Fallback: scan stale stations
+    if (added < deficit && this.staleStations.length > 0) {
+      for (const stationId of this.staleStations.slice(0, 3)) {
+        if (added >= deficit) break;
+        const key = `scan:${stationId}`;
+        if (existingTargets.has(key)) continue;
+        orders.push({
+          type: "scan",
+          targetId: stationId,
+          description: `Scan market at ${stationId.replace(/_/g, " ")}`,
+          priority: 25,
+          reason: "fallback: refresh stale market data",
+          stationId,
+          routineHint: "scout",
+        });
+        existingTargets.add(key);
+        added++;
+      }
+    }
+
+    // Fallback: harvest gas/ice (for bots with harvesters)
+    if (added < deficit) {
+      if (!existingTargets.has("mine:argon_gas")) {
+        orders.push({
+          type: "mine",
+          targetId: "argon_gas",
+          description: "Harvest argon gas (keep bots active)",
+          priority: 18,
+          reason: "fallback: keep bots active",
+          quantity: 30,
+          routineHint: "harvester",
+        });
+        added++;
+      }
+    }
+
+    if (added > 0) {
+      console.log(`[Economy] Generated ${added} fallback orders (${orders.length} total for ${this._fleetSize} bots)`);
+    }
   }
 
   /** Set stale station IDs for scan order generation */

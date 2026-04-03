@@ -249,10 +249,24 @@ export class WorkOrderManager {
 
     if (candidates.length === 0) return null;
 
-    // Sort by priority (highest first), then by chain order (earlier chain steps first)
+    // Role affinity: boost priority for orders matching bot's role
+    const ROLE_AFFINITY: Record<string, string[]> = {
+      trader: ["sell", "trade", "deliver"],
+      ore_miner: ["mine"], crystal_miner: ["mine"],
+      crafter: ["craft"],
+      quartermaster: ["buy", "sell"],
+      explorer: ["explore"], scout: ["scan"],
+      gas_harvester: ["mine"], ice_harvester: ["mine"],
+    };
+    const affinityTypes = new Set(ROLE_AFFINITY[botRole ?? ""] ?? []);
+
+    // Sort by effective priority (highest first), then by chain order
     candidates.sort((a, b) => {
-      if (b.priority !== a.priority) return b.priority - a.priority;
-      // Within same chain, prefer earlier steps
+      const aBoost = affinityTypes.has(a.type) ? 10 : 0;
+      const bBoost = affinityTypes.has(b.type) ? 10 : 0;
+      const aPri = a.priority + aBoost;
+      const bPri = b.priority + bBoost;
+      if (bPri !== aPri) return bPri - aPri;
       if (a.chainId && a.chainId === b.chainId) return a.createdAt - b.createdAt;
       return 0;
     });
@@ -368,6 +382,33 @@ export class WorkOrderManager {
       order.claimedBy = null;
       order.claimedAt = null;
     }
+  }
+
+  // ── Maintenance ──
+
+  /** Clean up stale claims — orders claimed by bots that are no longer active */
+  cleanupStaleClaims(activeBotIds: Set<string>, maxClaimAgeMs = 600_000): void {
+    const now = Date.now();
+    for (const [id, order] of this.orders) {
+      if (order.status !== "claimed") continue;
+      const botGone = order.claimedBy && !activeBotIds.has(order.claimedBy);
+      const tooOld = order.claimedAt && (now - order.claimedAt > maxClaimAgeMs);
+      if (botGone || tooOld) {
+        this.release(id);
+      }
+    }
+  }
+
+  /** Get count of unclaimed pending orders */
+  getUnclaimedCount(): number {
+    const now = Date.now();
+    let count = 0;
+    for (const order of this.orders.values()) {
+      if (order.status === "pending" && now < order.expiresAt && this.isDependencySatisfied(order)) {
+        count++;
+      }
+    }
+    return count;
   }
 
   // ── Queries ──
