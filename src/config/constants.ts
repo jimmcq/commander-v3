@@ -82,15 +82,67 @@ export const KNOWN_RESOURCE_LOCATIONS: Array<{ systemId: string; poiId: string; 
     ],
   },
   {
+    systemId: "diphda",
+    poiId: "crystalline_field_diphda",
+    poiName: "Crystalline Field — Diphda",
+    poiType: "asteroid_belt",
+    resources: [
+      { resourceId: "silicon_ore", richness: 44 },
+    ],
+  },
+  {
     systemId: "haven",
     poiId: "commerce_fields",
     poiName: "Commerce Fields",
     poiType: "asteroid_belt",
     resources: [
-      { resourceId: "silicon_ore", richness: 70 },
+      // silicon_ore DEPLETED at Haven — use Diphda instead
       { resourceId: "iron_ore", richness: 75 },
       { resourceId: "copper_ore", richness: 65 },
       { resourceId: "nickel_ore", richness: 55 },
+    ],
+  },
+  // ── From SpaceMolt KB (https://rsned.github.io/spacemolt-kb/resources/) ──
+  // Strategic resources with known active deposits
+  {
+    systemId: "alphecca",
+    poiId: "deep_titanium_vein_alphecca",
+    poiName: "Deep Titanium Vein — Alphecca",
+    poiType: "asteroid_belt",
+    resources: [{ resourceId: "titanium_ore", richness: 34 }],
+  },
+  {
+    systemId: "ivorygate",
+    poiId: "forgotten_prism",
+    poiName: "Forgotten Prism",
+    poiType: "asteroid_belt",
+    resources: [{ resourceId: "energy_crystal", richness: 22 }],
+  },
+  {
+    systemId: "garnet",
+    poiId: "garnet_belt",
+    poiName: "Garnet Belt",
+    poiType: "asteroid_belt",
+    resources: [{ resourceId: "gold_ore", richness: 38 }],
+  },
+  {
+    systemId: "markab",
+    poiId: "markab_belt",
+    poiName: "Markab Belt",
+    poiType: "asteroid_belt",
+    resources: [
+      { resourceId: "gold_ore", richness: 36 },
+      { resourceId: "palladium_ore", richness: 20 },
+    ],
+  },
+  {
+    systemId: "grumium",
+    poiId: "grumium_belt",
+    poiName: "Grumium Belt",
+    poiType: "asteroid_belt",
+    resources: [
+      { resourceId: "aluminum_ore", richness: 58 },
+      { resourceId: "palladium_ore", richness: 15 },
     ],
   },
 ];
