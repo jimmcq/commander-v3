@@ -173,7 +173,9 @@ export async function* trader(ctx: BotContext): AsyncGenerator<RoutineYield, voi
   const traderIndex = getParam(ctx, "traderIndex", 0);
 
   // Track items that failed to sell — seeded from fleet-wide cache, persists across sessions
-  const blacklistedItems = new Set<string>(ctx.cache.getUnsellableItems());
+  let unsellable: string[] = [];
+  try { unsellable = await ctx.cache.getUnsellableItems(); } catch { /* cache may not be ready */ }
+  const blacklistedItems = new Set<string>(unsellable);
 
   // Commander-assigned route (from scoring brain's arbitrage analysis)
   const assignedItem = getParam(ctx, "assignedItem", "");

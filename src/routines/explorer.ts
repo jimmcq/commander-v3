@@ -208,6 +208,9 @@ export async function* explorer(ctx: BotContext): AsyncGenerator<RoutineYield, v
 
     // If initial targets were specified, don't loop
     if (initialTargets.length > 0) break;
+
+    // Cooldown between exploration cycles to avoid tight loops
+    await interruptibleSleep(ctx, 60_000); // 1 min between cycles
   }
 
   // Disable cloaking
