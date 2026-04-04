@@ -615,7 +615,7 @@ export class OrderEngine {
     const circuitBoardsNeeded = (this.facilityMaterialNeeds.get("circuit_board") ?? 350) - circuitBoards;
     if (circuitBoardsNeeded > 0) {
       orders.push({
-        type: "craft", targetId: "assemble_circuit_board",
+        type: "craft", targetId: "fabricate_circuit_boards",
         description: `STRATEGIC: craft circuit boards (${circuitBoards}, need ${circuitBoards + circuitBoardsNeeded} for facilities)`,
         priority: PRI.FACILITY - 2, reason: "facility: circuit boards",
         quantity: Math.min(10, circuitBoardsNeeded),
