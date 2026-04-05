@@ -1755,7 +1755,7 @@ export function normalizeCatalogItem(raw: Record<string, unknown>): CatalogItem 
     name: str(raw.name),
     category: str(raw.category ?? raw.type),
     description: str(raw.description),
-    basePrice: num(raw.base_price ?? raw.basePrice ?? raw.price),
+    basePrice: num(raw.base_value ?? raw.base_price ?? raw.basePrice ?? raw.price),
     stackSize: num(raw.stack_size ?? raw.stackSize ?? 100) || 100,
     ...(size > 1 ? { size } : {}),
     ...(cpuCost > 0 ? { cpuCost } : {}),

@@ -449,10 +449,11 @@ export class GameCache {
     const cached = await this.getStatic("item_catalog", this.gameVersion);
     if (cached) {
       const raw = JSON.parse(cached) as Array<Record<string, unknown>>;
-      // Re-fetch if cache is missing cpuCost field (added later for module fit checks)
+      // Re-fetch if cache is missing fields added later
       const hasModuleFields = raw.some(r => "cpuCost" in r && (r.cpuCost as number) > 0);
       const hasModules = raw.some(r => r.category === "module");
-      const needsRefresh = hasModules && !hasModuleFields;
+      const hasBasePrice = raw.some(r => (r.basePrice as number) > 0);
+      const needsRefresh = (hasModules && !hasModuleFields) || !hasBasePrice;
       if (raw.length >= 50 && !needsRefresh) {
         const items = raw.map(normalizeCatalogItem);
         this.indexCatalogItems(items);
