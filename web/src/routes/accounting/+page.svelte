@@ -292,7 +292,9 @@
 							<tr class="hover:bg-nebula-blue/20 transition-colors">
 								<td class="py-1.5 pr-3 text-xs text-hull-grey whitespace-nowrap">{formatTime(entry.timestamp)}</td>
 								<td class="py-1.5 pr-3 text-xs text-star-white">{botName(entry.botId)}</td>
-								<td class="py-1.5 pr-3 text-xs {typeColor(entry.type)}">{typeLabel(entry.type)}</td>
+								<td class="py-1.5 pr-3 text-xs {typeColor(entry.type)}">
+									{typeLabel(entry.type)}{#if entry.itemName || entry.itemId}<span class="text-chrome-silver"> — {entry.quantity ?? ""}x {entry.itemName ?? entry.itemId}</span>{/if}
+								</td>
 								{#if ledgerMode !== "credits"}
 									<td class="py-1.5 pr-3 text-xs text-chrome-silver">{entry.itemName ?? entry.itemId ?? "--"}</td>
 									<td class="py-1.5 pr-3 text-xs text-right mono text-star-white">{entry.quantity != null ? entry.quantity.toLocaleString() : "--"}</td>
