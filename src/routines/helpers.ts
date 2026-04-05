@@ -332,6 +332,35 @@ export async function dockAtCurrent(ctx: BotContext): Promise<void> {
       } catch { /* may fail if not at faction station */ }
     }
 
+    // At faction home: cancel personal orders and deposit cargo to faction storage
+    const factionHome = ctx.fleetConfig.factionStorageStation;
+    if (factionHome && ctx.player.dockedAtBase === factionHome) {
+      // Cancel stale personal orders — we use faction orders now
+      try {
+        const personalOrders = await ctx.api.viewOrders(undefined, "personal");
+        for (const order of personalOrders) {
+          if (order.id) {
+            try {
+              await ctx.api.cancelOrder(order.id);
+              log(ctx, `cancelled personal ${order.type} order: ${order.itemName ?? order.itemId} x${order.quantity}`);
+            } catch { /* already cancelled or filled */ }
+          }
+        }
+      } catch { /* viewOrders may not support personal scope */ }
+
+      // Deposit all cargo to faction storage (except fuel cells)
+      for (const item of ctx.ship.cargo) {
+        if (item.itemId === "fuel_cell" || item.quantity <= 0) continue;
+        try {
+          await ctx.api.factionDepositItems(item.itemId, item.quantity);
+        } catch { /* best effort */ }
+      }
+      if (ctx.ship.cargo.some(c => c.itemId !== "fuel_cell" && c.quantity > 0)) {
+        ctx.cache.invalidateFactionStorage();
+        await ctx.refreshState();
+      }
+    }
+
   }
 }
 
