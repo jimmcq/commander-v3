@@ -6,7 +6,7 @@ const config = {
 		adapter: adapter({
 			pages: 'build',
 			assets: 'build',
-			fallback: 'index.html', // SPA mode - all routes serve index.html
+			fallback: '200.html', // SPA fallback — server serves this for all routes
 			precompress: false,
 			strict: true
 		}),

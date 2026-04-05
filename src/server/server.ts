@@ -148,7 +148,14 @@ export function createServer(opts: ServerOptions) {
         });
       }
 
-      // SPA fallback
+      // SPA fallback — serve 200.html for all unmatched routes (client-side routing)
+      const spaFallback = Bun.file(`${opts.staticDir}/200.html`);
+      if (await spaFallback.exists()) {
+        return new Response(spaFallback, {
+          headers: { "Content-Type": "text/html;charset=utf-8" },
+        });
+      }
+      // Legacy fallback
       const indexFile = Bun.file(`${opts.staticDir}/index.html`);
       if (await indexFile.exists()) {
         return new Response(indexFile, {
