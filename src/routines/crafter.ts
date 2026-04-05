@@ -217,8 +217,17 @@ export async function* crafter(ctx: BotContext): AsyncGenerator<RoutineYield, vo
   }
 
   // Build the crafting chain (ordered steps, deepest deps first)
-  let chain = ctx.crafting.buildChain(recipeId, count);
-  let rawMaterials = ctx.crafting.getRawMaterials(recipeId, count);
+  // When recipe is directly specified via work order params, don't expand chain —
+  // craft the recipe as-is with materials from storage (avoids 9-step chains for simple recipes)
+  const directRecipe = getParam(ctx, "recipeId", "");
+  let chain = directRecipe
+    ? [{ recipeId, recipeName: recipe.name, batchCount: count,
+         inputs: recipe.ingredients.map(i => ({ itemId: i.itemId, itemName: ctx.crafting.getItemName(i.itemId), quantity: i.quantity * count, isRaw: ctx.crafting.isRawMaterial(i.itemId) })),
+         output: { itemId: recipe.outputItem, itemName: ctx.crafting.getItemName(recipe.outputItem), quantity: recipe.outputQuantity * count } }]
+    : ctx.crafting.buildChain(recipeId, count);
+  let rawMaterials = directRecipe
+    ? new Map(recipe.ingredients.map(i => [i.itemId, i.quantity * count]))
+    : ctx.crafting.getRawMaterials(recipeId, count);
 
   // Pre-check: abort if any chain step is a known facility-only recipe
   const brokenStep = chain.find(step => facilityOnlyRecipes.has(step.recipeId));
