@@ -25,7 +25,7 @@
 	let range = $state("1d");
 	let botFilter = $state("");
 	let typeFilter = $state("");
-	let ledgerMode = $state<"all" | "credits" | "items">("all");
+	let ledgerMode = $state<"all" | "credits" | "items">("credits");
 
 	const CREDIT_TYPES = new Set(["credit_deposit", "credit_withdraw", "npc_sell", "npc_buy", "sell_order_fill", "buy_order_fill", "sell_order_create", "buy_order_create", "fuel_purchase", "module_purchase", "insurance", "tax"]);
 	const ITEM_TYPES = new Set(["item_deposit", "item_withdraw", "craft"]);
@@ -53,11 +53,12 @@
 	}
 
 	function typeColor(type: string): string {
-		if (type.includes("sell") || type === "npc_sell" || type === "sell_order_fill") return "text-bio-green";
-		if (type.includes("buy") || type.includes("purchase") || type === "npc_buy" || type === "tax") return "text-claw-red";
-		if (type === "item_deposit" || type === "credit_deposit") return "text-plasma-cyan";
-		if (type === "item_withdraw" || type === "credit_withdraw") return "text-warning-yellow";
+		if (type === "npc_sell" || type === "sell_order_fill" || type === "credit_withdraw") return "text-bio-green";
+		if (type === "npc_buy" || type === "buy_order_create" || type === "fuel_purchase" || type === "module_purchase" || type === "tax" || type === "insurance" || type === "credit_deposit") return "text-claw-red";
+		if (type === "item_deposit") return "text-plasma-cyan";
+		if (type === "item_withdraw") return "text-warning-yellow";
 		if (type === "craft") return "text-laser-blue";
+		if (type === "sell_order_create") return "text-bio-green/70";
 		return "text-chrome-silver";
 	}
 
@@ -71,25 +72,37 @@
 		return bot?.username ?? botId.slice(0, 8);
 	}
 
-	// Filtered entries based on ledger mode
 	const filteredEntries = $derived.by(() => {
 		if (ledgerMode === "credits") return entries.filter(e => CREDIT_TYPES.has(e.type));
 		if (ledgerMode === "items") return entries.filter(e => ITEM_TYPES.has(e.type));
 		return entries;
 	});
 
-	// Running balance (credits mode only, oldest to newest then reversed for display)
+	// Running balance with starting/ending balance
+	const startingBalance = $derived.by(() => {
+		if (ledgerMode !== "credits") return 0;
+		// Starting balance = negative of all movements in period (what balance was before these transactions)
+		return 0; // We don't know the absolute balance, so start from 0
+	});
+
 	const entriesWithBalance = $derived.by(() => {
-		if (ledgerMode !== "credits") return filteredEntries.map(e => ({ ...e, balance: null as number | null }));
-		// Compute running balance from oldest to newest
+		if (ledgerMode !== "credits") return filteredEntries.map(e => ({ ...e, balance: null as number | null, debit: null as number | null, credit: null as number | null }));
 		const reversed = [...filteredEntries].reverse();
 		let balance = 0;
 		const withBal = reversed.map(e => {
-			balance += (e.credits ?? 0);
-			return { ...e, balance };
+			const amt = e.credits ?? 0;
+			balance += amt;
+			return {
+				...e,
+				debit: amt < 0 ? Math.abs(amt) : null,
+				credit: amt > 0 ? amt : null,
+				balance,
+			};
 		});
-		return withBal.reverse(); // Back to newest-first for display
+		return withBal.reverse();
 	});
+
+	const endingBalance = $derived(entriesWithBalance.length > 0 ? (entriesWithBalance[0]?.balance ?? 0) : 0);
 
 	async function fetchLedger() {
 		loading = true;
@@ -112,7 +125,6 @@
 		return () => clearInterval(interval);
 	});
 
-	// Re-fetch on filter change
 	$effect(() => {
 		range; botFilter; typeFilter;
 		fetchLedger();
@@ -142,24 +154,49 @@
 	</div>
 
 	<!-- Summary cards -->
-	<div class="grid grid-cols-2 md:grid-cols-4 gap-3">
-		<div class="card p-4">
-			<p class="text-xs text-chrome-silver uppercase tracking-wider">Income</p>
-			<p class="text-xl font-bold mono text-bio-green mt-1">+{summary.totalIncome.toLocaleString()} cr</p>
+	{#if ledgerMode === "credits"}
+		<div class="grid grid-cols-2 md:grid-cols-5 gap-3">
+			<div class="card p-4">
+				<p class="text-xs text-chrome-silver uppercase tracking-wider">Starting</p>
+				<p class="text-lg font-bold mono text-hull-grey mt-1">0 cr</p>
+			</div>
+			<div class="card p-4">
+				<p class="text-xs text-chrome-silver uppercase tracking-wider">Total Debits</p>
+				<p class="text-lg font-bold mono text-claw-red mt-1">-{Math.abs(summary.totalExpense).toLocaleString()} cr</p>
+			</div>
+			<div class="card p-4">
+				<p class="text-xs text-chrome-silver uppercase tracking-wider">Total Credits</p>
+				<p class="text-lg font-bold mono text-bio-green mt-1">+{summary.totalIncome.toLocaleString()} cr</p>
+			</div>
+			<div class="card p-4">
+				<p class="text-xs text-chrome-silver uppercase tracking-wider">Net Change</p>
+				<p class="text-lg font-bold mono {summary.net >= 0 ? 'text-bio-green' : 'text-claw-red'} mt-1">{summary.net >= 0 ? '+' : ''}{summary.net.toLocaleString()} cr</p>
+			</div>
+			<div class="card p-4">
+				<p class="text-xs text-chrome-silver uppercase tracking-wider">Ending</p>
+				<p class="text-lg font-bold mono {endingBalance >= 0 ? 'text-star-white' : 'text-claw-red'} mt-1">{endingBalance.toLocaleString()} cr</p>
+			</div>
 		</div>
-		<div class="card p-4">
-			<p class="text-xs text-chrome-silver uppercase tracking-wider">Expenses</p>
-			<p class="text-xl font-bold mono text-claw-red mt-1">{summary.totalExpense.toLocaleString()} cr</p>
+	{:else}
+		<div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+			<div class="card p-4">
+				<p class="text-xs text-chrome-silver uppercase tracking-wider">Income</p>
+				<p class="text-xl font-bold mono text-bio-green mt-1">+{summary.totalIncome.toLocaleString()} cr</p>
+			</div>
+			<div class="card p-4">
+				<p class="text-xs text-chrome-silver uppercase tracking-wider">Expenses</p>
+				<p class="text-xl font-bold mono text-claw-red mt-1">{summary.totalExpense.toLocaleString()} cr</p>
+			</div>
+			<div class="card p-4">
+				<p class="text-xs text-chrome-silver uppercase tracking-wider">Net</p>
+				<p class="text-xl font-bold mono {summary.net >= 0 ? 'text-bio-green' : 'text-claw-red'} mt-1">{summary.net >= 0 ? '+' : ''}{summary.net.toLocaleString()} cr</p>
+			</div>
+			<div class="card p-4">
+				<p class="text-xs text-chrome-silver uppercase tracking-wider">Transactions</p>
+				<p class="text-xl font-bold mono text-star-white mt-1">{filteredEntries.length.toLocaleString()}</p>
+			</div>
 		</div>
-		<div class="card p-4">
-			<p class="text-xs text-chrome-silver uppercase tracking-wider">Net</p>
-			<p class="text-xl font-bold mono {summary.net >= 0 ? 'text-bio-green' : 'text-claw-red'} mt-1">{summary.net >= 0 ? '+' : ''}{summary.net.toLocaleString()} cr</p>
-		</div>
-		<div class="card p-4">
-			<p class="text-xs text-chrome-silver uppercase tracking-wider">Showing</p>
-			<p class="text-xl font-bold mono text-star-white mt-1">{filteredEntries.length}<span class="text-sm text-hull-grey">/{summary.count}</span></p>
-		</div>
-	</div>
+	{/if}
 
 	<!-- Filters -->
 	<div class="card p-4">
@@ -212,16 +249,27 @@
 								<th class="pb-2 pr-3">Item</th>
 								<th class="pb-2 pr-3 text-right">Qty</th>
 							{/if}
-							{#if ledgerMode !== "items"}
-								<th class="pb-2 pr-3 text-right">Credits</th>
-							{/if}
 							{#if ledgerMode === "credits"}
+								<th class="pb-2 pr-3 text-right">Debit</th>
+								<th class="pb-2 pr-3 text-right">Credit</th>
 								<th class="pb-2 pr-3 text-right">Balance</th>
+							{:else if ledgerMode === "all"}
+								<th class="pb-2 pr-3 text-right">Amount</th>
 							{/if}
 							<th class="pb-2">Details</th>
 						</tr>
 					</thead>
-					<tbody class="divide-y divide-hull-grey/20">
+					<tbody class="divide-y divide-hull-grey/10">
+						{#if ledgerMode === "credits"}
+							<!-- Starting balance row -->
+							<tr class="bg-nebula-blue/10">
+								<td class="py-1.5 pr-3 text-xs text-hull-grey" colspan="3">Starting Balance</td>
+								<td class="py-1.5 pr-3"></td>
+								<td class="py-1.5 pr-3"></td>
+								<td class="py-1.5 pr-3 text-xs text-right mono text-hull-grey">0</td>
+								<td class="py-1.5"></td>
+							</tr>
+						{/if}
 						{#each entriesWithBalance as entry}
 							<tr class="hover:bg-nebula-blue/20 transition-colors">
 								<td class="py-1.5 pr-3 text-xs text-hull-grey whitespace-nowrap">{formatTime(entry.timestamp)}</td>
@@ -231,23 +279,30 @@
 									<td class="py-1.5 pr-3 text-xs text-chrome-silver">{entry.itemName ?? entry.itemId ?? "--"}</td>
 									<td class="py-1.5 pr-3 text-xs text-right mono text-star-white">{entry.quantity != null ? entry.quantity.toLocaleString() : "--"}</td>
 								{/if}
-								{#if ledgerMode !== "items"}
-									<td class="py-1.5 pr-3 text-xs text-right mono {(entry.credits ?? 0) > 0 ? 'text-bio-green' : (entry.credits ?? 0) < 0 ? 'text-claw-red' : 'text-hull-grey'}">
-										{#if entry.credits != null}
-											{entry.credits > 0 ? '+' : ''}{entry.credits.toLocaleString()}
-										{:else}
-											--
-										{/if}
-									</td>
-								{/if}
 								{#if ledgerMode === "credits"}
-									<td class="py-1.5 pr-3 text-xs text-right mono {(entry.balance ?? 0) >= 0 ? 'text-star-white' : 'text-claw-red'}">
-										{entry.balance != null ? entry.balance.toLocaleString() : "--"}
+									<td class="py-1.5 pr-3 text-xs text-right mono text-claw-red">{entry.debit != null ? entry.debit.toLocaleString() : ""}</td>
+									<td class="py-1.5 pr-3 text-xs text-right mono text-bio-green">{entry.credit != null ? entry.credit.toLocaleString() : ""}</td>
+									<td class="py-1.5 pr-3 text-xs text-right mono {(entry.balance ?? 0) >= 0 ? 'text-star-white' : 'text-claw-red'}">{entry.balance != null ? entry.balance.toLocaleString() : ""}</td>
+								{:else if ledgerMode === "all"}
+									<td class="py-1.5 pr-3 text-xs text-right mono {(entry.credits ?? 0) > 0 ? 'text-bio-green' : (entry.credits ?? 0) < 0 ? 'text-claw-red' : 'text-hull-grey'}">
+										{#if entry.credits != null && entry.credits !== 0}
+											{entry.credits > 0 ? '+' : ''}{entry.credits.toLocaleString()}
+										{/if}
 									</td>
 								{/if}
 								<td class="py-1.5 text-xs text-hull-grey max-w-[250px] truncate" title={entry.details ?? ""}>{entry.details ?? ""}</td>
 							</tr>
 						{/each}
+						{#if ledgerMode === "credits"}
+							<!-- Ending balance row -->
+							<tr class="bg-nebula-blue/10 border-t border-hull-grey/30">
+								<td class="py-2 pr-3 text-xs font-semibold text-star-white" colspan="3">Ending Balance</td>
+								<td class="py-2 pr-3 text-xs text-right mono font-semibold text-claw-red">{Math.abs(summary.totalExpense).toLocaleString()}</td>
+								<td class="py-2 pr-3 text-xs text-right mono font-semibold text-bio-green">{summary.totalIncome.toLocaleString()}</td>
+								<td class="py-2 pr-3 text-xs text-right mono font-semibold {endingBalance >= 0 ? 'text-star-white' : 'text-claw-red'}">{endingBalance.toLocaleString()}</td>
+								<td class="py-2"></td>
+							</tr>
+						{/if}
 					</tbody>
 				</table>
 			</div>
