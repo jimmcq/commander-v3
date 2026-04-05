@@ -434,6 +434,10 @@ async function* manageFactionSales(
     const aDemand = demandItemIds.has(a.itemId) ? 1 : 0;
     const bDemand = demandItemIds.has(b.itemId) ? 1 : 0;
     if (aDemand !== bDemand) return bDemand - aDemand; // Demand items first
+    // Then by estimated unit value (high-ticket first)
+    const aPrice = ctx.crafting.getEffectiveSellPrice(a.itemId) || ctx.crafting.getItemBasePrice(a.itemId);
+    const bPrice = ctx.crafting.getEffectiveSellPrice(b.itemId) || ctx.crafting.getItemBasePrice(b.itemId);
+    if (bPrice !== aPrice) return bPrice - aPrice; // Highest value items first
     return b.quantity - a.quantity; // Then by quantity
   });
 
@@ -1934,13 +1938,13 @@ export function calculateSellPrice(
   // Use pre-built index if available, otherwise build on the fly
   const idx = priceIdx ?? buildPriceIndex(ctx, homeBase);
   const entry = idx.get(itemId);
-  const cheapestElsewhere = entry?.cheapestBuy ?? Infinity;
-  const bestBuyerPrice = entry?.bestBuy ?? 0; // Highest price ANY buyer will pay
-  const bestDemandPrice = Math.max(bestBuyerPrice, entry?.bestSell ?? 0); // Best of buyer or seller
+  const cheapestElsewhere = entry?.cheapestBuy ?? Infinity; // Cheapest sell listing at other stations
+  // Note: in MarketPrice schema, sellPrice = buy order price (what buyers pay us)
 
   // Skip items where market value is far below crafting cost AND no demand exists
-  // If demand exists (bestDemandPrice > 0), let market price drive the listing
-  if (cheapestElsewhere < Infinity && cheapestElsewhere < costBasis * 0.5 && bestDemandPrice <= 0) {
+  // If demand exists (actual buyer orders > 0), let market price drive the listing
+  const actualBuyerExists = (entry?.bestSell ?? 0) > 0;
+  if (cheapestElsewhere < Infinity && cheapestElsewhere < costBasis * 0.5 && !actualBuyerExists) {
     return null;
   }
 
@@ -1959,12 +1963,14 @@ export function calculateSellPrice(
     }
   }
 
-  // Calculate list price: use BUYER demand as primary signal (what buyers will pay)
-  // NOT cheapest seller (which can be 1cr for items worth thousands)
+  // Calculate list price: use actual buyer demand (sellPrice = buy order price in our schema)
+  // bestSell = highest buy order (what buyers actually pay us)
+  // bestBuy = cheapest sell listing (what sellers ask — NOT buyer demand)
   let listPrice: number;
-  if (bestDemandPrice > 0) {
+  const actualBuyerPrice = entry?.bestSell ?? 0; // What buyers will actually pay
+  if (actualBuyerPrice > 0) {
     // Price slightly below what buyers are paying (instant fills)
-    listPrice = Math.floor(bestDemandPrice * demandBoost * (1 - undercutPct / 2));
+    listPrice = Math.floor(actualBuyerPrice * demandBoost * (1 - undercutPct / 2));
   } else if (cheapestElsewhere < Infinity && cheapestElsewhere > costBasis * 0.5) {
     // No buyer data — use competitor pricing (but only if reasonable vs cost)
     listPrice = Math.floor(cheapestElsewhere * demandBoost * (1 - undercutPct));
