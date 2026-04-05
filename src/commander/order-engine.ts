@@ -322,7 +322,7 @@ export class OrderEngine {
     this.generateSupplyOrders(activeBots, ctx, orders);
 
     // ── TIER 5: CRAFT ──
-    this.generateCraftOrders(ctx, orders);
+    this.generateCraftOrders(ctx, orders, activeBots);
 
     // ── TIER 6: SELL SURPLUS ──
     this.generateSellOrders(ctx, orders);
@@ -597,14 +597,24 @@ export class OrderEngine {
 
   // ── Tier 5: Craft ──
 
-  private generateCraftOrders(ctx: OrderContext, orders: FleetWorkOrder[]): void {
+  /** Count bots with a given role that are available for work */
+  private countAvailableCrafters(bots: FleetBotInfo[]): number {
+    return bots.filter(b =>
+      (b.role === "crafter" || b.role === "shipwright") &&
+      (b.status === "running" || b.status === "ready" || b.status === "idle")
+    ).length;
+  }
+
+  private generateCraftOrders(ctx: OrderContext, orders: FleetWorkOrder[], bots: FleetBotInfo[]): void {
     // ═══════════════════════════════════════════════════════
     // CRAFT ORDERS — triggered by having available ore inputs
     // Priority: facility materials > supply chain > general
     // Rule: only craft if ALL inputs available (no speculative buys)
+    // Generate multiple orders per recipe so all crafters stay busy.
     // ═══════════════════════════════════════════════════════
 
     // ── 1. STRATEGIC CRAFTING (pri 82-85) — facility build materials ──
+    const crafterSlots = Math.max(1, this.countAvailableCrafters(bots));
     const silicon = this.factionInventory.get("silicon_ore") ?? 0;
     const energyCrystal = this.factionInventory.get("energy_crystal") ?? 0;
     const opticalFiber = this.factionInventory.get("optical_fiber_bundle") ?? 0;
@@ -618,6 +628,7 @@ export class OrderEngine {
         description: `CRITICAL: craft ${canCraft} optical fiber (${opticalFiber}/${opticalFiber + opticalFiberNeeded} for Trade Ledger)`,
         priority: PRI.MAINTENANCE, reason: "facility: optical fiber → Trade Ledger",
         quantity: Math.min(canCraft, 10),
+        maxConcurrent: crafterSlots,
       });
     }
 
@@ -629,6 +640,7 @@ export class OrderEngine {
         description: `STRATEGIC: craft circuit boards (${circuitBoards}, need ${circuitBoards + circuitBoardsNeeded} for facilities)`,
         priority: PRI.FACILITY - 2, reason: "facility: circuit boards",
         quantity: Math.min(10, circuitBoardsNeeded),
+        maxConcurrent: crafterSlots,
       });
     }
 
@@ -640,20 +652,20 @@ export class OrderEngine {
     if (energyCrystal >= 1 && steelPlates >= 1) {
       const canCraft = Math.min(Math.floor(energyCrystal), Math.floor(steelPlates), 10);
       if (fuelCells < FUEL_CELL_RESERVE) {
-        // High priority: build reserve for fleet operations
         orders.push({
           type: "craft", targetId: "assemble_fuel_cells",
           description: `CRITICAL: craft fuel cells (${fuelCells}/${FUEL_CELL_RESERVE} reserve)`,
           priority: PRI.MAINTENANCE + 5, reason: "fuel_cell_reserve",
           quantity: canCraft,
+          maxConcurrent: crafterSlots,
         });
       } else {
-        // Reserve met: craft to sell for profit
         orders.push({
           type: "craft", targetId: "assemble_fuel_cells",
           description: `Craft fuel cells for sale (${fuelCells} in stock, ${FUEL_CELL_RESERVE} reserved)`,
           priority: PRI.CRAFT, reason: "fuel_cell_sell",
           quantity: canCraft,
+          maxConcurrent: crafterSlots,
         });
       }
     }

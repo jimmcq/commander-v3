@@ -189,6 +189,8 @@ export interface FleetWorkOrder {
   routineHint?: RoutineName;
   /** Required module pattern (e.g. "mining_laser" for mine orders) */
   requiredModule?: string;
+  /** Max concurrent bots that can work on this order (default 1) */
+  maxConcurrent?: number;
 }
 
 /** Persistent work order with claim tracking */

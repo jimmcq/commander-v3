@@ -53,18 +53,20 @@ export async function* crafter(ctx: BotContext): AsyncGenerator<RoutineYield, vo
       startWorkOrder(ctx, order.id);
       if (order.quantity) count = order.quantity;
       // Work order targetId is a recipe ID or item ID — always use it (priority is authoritative)
-      if (order.targetId) {
-        const directRecipe = ctx.crafting.getRecipe(order.targetId);
+      // Strip slot suffix (e.g., "assemble_fuel_cells#2" → "assemble_fuel_cells")
+      const orderTarget = order.targetId?.replace(/#\d+$/, "") ?? "";
+      if (orderTarget) {
+        const directRecipe = ctx.crafting.getRecipe(orderTarget);
         if (directRecipe) {
           recipeId = directRecipe.id;
           yield `work order: craft via ${directRecipe.name ?? directRecipe.id} (priority ${order.priority})`;
         } else {
-          const recipes = ctx.crafting.findRecipesForItem(order.targetId);
+          const recipes = ctx.crafting.findRecipesForItem(orderTarget);
           if (recipes.length > 0) {
             recipeId = recipes[0].id;
-            yield `work order: craft ${order.targetId.replace(/_/g, " ")} via ${recipes[0].name ?? recipes[0].id} (priority ${order.priority})`;
+            yield `work order: craft ${orderTarget.replace(/_/g, " ")} via ${recipes[0].name ?? recipes[0].id} (priority ${order.priority})`;
           } else {
-            yield `work order: craft ${order.targetId.replace(/_/g, " ")} — no recipe found, auto-discovering`;
+            yield `work order: craft ${orderTarget.replace(/_/g, " ")} — no recipe found, auto-discovering`;
           }
         }
       }

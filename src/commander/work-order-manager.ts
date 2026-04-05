@@ -164,7 +164,25 @@ export class WorkOrderManager {
     }
 
     // Deduplicate + update existing orders
+    // For multi-concurrent orders, expand into N slots with indexed targetIds
+    const expandedOrders: FleetWorkOrder[] = [];
     for (const ecoOrder of economyOrders) {
+      const slots = ecoOrder.maxConcurrent ?? 1;
+      if (slots <= 1) {
+        expandedOrders.push(ecoOrder);
+      } else {
+        for (let i = 0; i < slots; i++) {
+          expandedOrders.push({
+            ...ecoOrder,
+            targetId: `${ecoOrder.targetId}#${i}`,
+            description: `${ecoOrder.description} [${i + 1}/${slots}]`,
+            maxConcurrent: undefined, // Already expanded
+          });
+        }
+      }
+    }
+
+    for (const ecoOrder of expandedOrders) {
       const existing = [...this.orders.values()].find(
         o => !o.chainId && o.targetId === ecoOrder.targetId &&
           (o.status === "pending" || o.status === "claimed" || o.status === "in_progress")
