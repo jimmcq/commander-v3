@@ -41,7 +41,8 @@ import {
 export async function* crafter(ctx: BotContext): AsyncGenerator<RoutineYield, void, void> {
   let recipeId = "";
   let count = 1;
-  const craftStation = getParam(ctx, "craftStation", "");
+  // Default to faction storage station — crafters need faction materials
+  const craftStation = getParam(ctx, "craftStation", "") || ctx.fleetConfig.factionStorageStation || "";
 
   // ── Claim highest-priority craft work order (strict priority) ──
   let activeWorkOrder: string | null = null;
