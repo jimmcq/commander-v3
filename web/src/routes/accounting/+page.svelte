@@ -25,6 +25,10 @@
 	let range = $state("1d");
 	let botFilter = $state("");
 	let typeFilter = $state("");
+	let ledgerMode = $state<"all" | "credits" | "items">("all");
+
+	const CREDIT_TYPES = new Set(["credit_deposit", "credit_withdraw", "npc_sell", "npc_buy", "sell_order_fill", "buy_order_fill", "sell_order_create", "buy_order_create", "fuel_purchase", "module_purchase", "insurance", "tax"]);
+	const ITEM_TYPES = new Set(["item_deposit", "item_withdraw", "craft"]);
 
 	const TYPE_LABELS: Record<string, string> = {
 		credit_deposit: "Credit Deposit",
@@ -41,6 +45,7 @@
 		module_purchase: "Module Purchase",
 		insurance: "Insurance",
 		tax: "Tax",
+		craft: "Crafted",
 	};
 
 	function typeLabel(type: string): string {
@@ -48,11 +53,11 @@
 	}
 
 	function typeColor(type: string): string {
-		if (type.includes("sell") || type.includes("revenue") || type === "npc_sell") return "text-bio-green";
-		if (type.includes("buy") || type.includes("cost") || type.includes("purchase") || type === "npc_buy") return "text-claw-red";
-		if (type.includes("deposit")) return "text-plasma-cyan";
-		if (type.includes("withdraw")) return "text-warning-yellow";
-		if (type === "tax") return "text-claw-red";
+		if (type.includes("sell") || type === "npc_sell" || type === "sell_order_fill") return "text-bio-green";
+		if (type.includes("buy") || type.includes("purchase") || type === "npc_buy" || type === "tax") return "text-claw-red";
+		if (type === "item_deposit" || type === "credit_deposit") return "text-plasma-cyan";
+		if (type === "item_withdraw" || type === "credit_withdraw") return "text-warning-yellow";
+		if (type === "craft") return "text-laser-blue";
 		return "text-chrome-silver";
 	}
 
@@ -65,6 +70,26 @@
 		const bot = $bots.find(b => b.id === botId);
 		return bot?.username ?? botId.slice(0, 8);
 	}
+
+	// Filtered entries based on ledger mode
+	const filteredEntries = $derived.by(() => {
+		if (ledgerMode === "credits") return entries.filter(e => CREDIT_TYPES.has(e.type));
+		if (ledgerMode === "items") return entries.filter(e => ITEM_TYPES.has(e.type));
+		return entries;
+	});
+
+	// Running balance (credits mode only, oldest to newest then reversed for display)
+	const entriesWithBalance = $derived.by(() => {
+		if (ledgerMode !== "credits") return filteredEntries.map(e => ({ ...e, balance: null as number | null }));
+		// Compute running balance from oldest to newest
+		const reversed = [...filteredEntries].reverse();
+		let balance = 0;
+		const withBal = reversed.map(e => {
+			balance += (e.credits ?? 0);
+			return { ...e, balance };
+		});
+		return withBal.reverse(); // Back to newest-first for display
+	});
 
 	async function fetchLedger() {
 		loading = true;
@@ -93,7 +118,12 @@
 		fetchLedger();
 	});
 
-	const uniqueTypes = $derived([...new Set(entries.map(e => e.type))].sort());
+	const uniqueTypes = $derived.by(() => {
+		const types = [...new Set(entries.map(e => e.type))].sort();
+		if (ledgerMode === "credits") return types.filter(t => CREDIT_TYPES.has(t));
+		if (ledgerMode === "items") return types.filter(t => ITEM_TYPES.has(t));
+		return types;
+	});
 	const uniqueBots = $derived([...new Set(entries.filter(e => e.botId).map(e => e.botId!))]);
 </script>
 
@@ -104,6 +134,11 @@
 <div class="space-y-4">
 	<div class="flex items-center justify-between">
 		<h1 class="text-2xl font-bold text-star-white">Accounting Ledger</h1>
+		<div class="flex gap-1 bg-deep-void rounded-lg p-0.5 border border-hull-grey/20">
+			<button class="px-3 py-1 text-xs rounded-md transition-colors {ledgerMode === 'all' ? 'bg-plasma-cyan/20 text-plasma-cyan' : 'text-hull-grey hover:text-star-white'}" onclick={() => ledgerMode = "all"}>All</button>
+			<button class="px-3 py-1 text-xs rounded-md transition-colors {ledgerMode === 'credits' ? 'bg-bio-green/20 text-bio-green' : 'text-hull-grey hover:text-star-white'}" onclick={() => ledgerMode = "credits"}>Credits</button>
+			<button class="px-3 py-1 text-xs rounded-md transition-colors {ledgerMode === 'items' ? 'bg-laser-blue/20 text-laser-blue' : 'text-hull-grey hover:text-star-white'}" onclick={() => ledgerMode = "items"}>Items</button>
+		</div>
 	</div>
 
 	<!-- Summary cards -->
@@ -121,8 +156,8 @@
 			<p class="text-xl font-bold mono {summary.net >= 0 ? 'text-bio-green' : 'text-claw-red'} mt-1">{summary.net >= 0 ? '+' : ''}{summary.net.toLocaleString()} cr</p>
 		</div>
 		<div class="card p-4">
-			<p class="text-xs text-chrome-silver uppercase tracking-wider">Transactions</p>
-			<p class="text-xl font-bold mono text-star-white mt-1">{summary.count}</p>
+			<p class="text-xs text-chrome-silver uppercase tracking-wider">Showing</p>
+			<p class="text-xl font-bold mono text-star-white mt-1">{filteredEntries.length}<span class="text-sm text-hull-grey">/{summary.count}</span></p>
 		</div>
 	</div>
 
@@ -142,7 +177,6 @@
 				<label class="text-xs text-chrome-silver uppercase">Account</label>
 				<select class="bg-deep-void border border-hull-grey/30 rounded px-2 py-1 text-xs text-star-white" bind:value={botFilter}>
 					<option value="">All</option>
-					<option value="">-- Faction --</option>
 					{#each uniqueBots as bid}
 						<option value={bid}>{botName(bid)}</option>
 					{/each}
@@ -164,8 +198,8 @@
 	<div class="card p-4">
 		{#if loading && entries.length === 0}
 			<p class="text-hull-grey text-center py-8">Loading transactions...</p>
-		{:else if entries.length === 0}
-			<p class="text-hull-grey text-center py-8">No transactions found for this period</p>
+		{:else if filteredEntries.length === 0}
+			<p class="text-hull-grey text-center py-8">No transactions found</p>
 		{:else}
 			<div class="overflow-x-auto">
 				<table class="w-full text-sm">
@@ -174,28 +208,44 @@
 							<th class="pb-2 pr-3">Time</th>
 							<th class="pb-2 pr-3">Account</th>
 							<th class="pb-2 pr-3">Type</th>
-							<th class="pb-2 pr-3">Item</th>
-							<th class="pb-2 pr-3 text-right">Qty</th>
-							<th class="pb-2 pr-3 text-right">Credits</th>
+							{#if ledgerMode !== "credits"}
+								<th class="pb-2 pr-3">Item</th>
+								<th class="pb-2 pr-3 text-right">Qty</th>
+							{/if}
+							{#if ledgerMode !== "items"}
+								<th class="pb-2 pr-3 text-right">Credits</th>
+							{/if}
+							{#if ledgerMode === "credits"}
+								<th class="pb-2 pr-3 text-right">Balance</th>
+							{/if}
 							<th class="pb-2">Details</th>
 						</tr>
 					</thead>
 					<tbody class="divide-y divide-hull-grey/20">
-						{#each entries as entry}
+						{#each entriesWithBalance as entry}
 							<tr class="hover:bg-nebula-blue/20 transition-colors">
 								<td class="py-1.5 pr-3 text-xs text-hull-grey whitespace-nowrap">{formatTime(entry.timestamp)}</td>
 								<td class="py-1.5 pr-3 text-xs text-star-white">{botName(entry.botId)}</td>
 								<td class="py-1.5 pr-3 text-xs {typeColor(entry.type)}">{typeLabel(entry.type)}</td>
-								<td class="py-1.5 pr-3 text-xs text-chrome-silver">{entry.itemName ?? entry.itemId ?? "--"}</td>
-								<td class="py-1.5 pr-3 text-xs text-right mono text-star-white">{entry.quantity ?? "--"}</td>
-								<td class="py-1.5 pr-3 text-xs text-right mono {(entry.credits ?? 0) >= 0 ? 'text-bio-green' : 'text-claw-red'}">
-									{#if entry.credits != null}
-										{entry.credits >= 0 ? '+' : ''}{entry.credits.toLocaleString()}
-									{:else}
-										--
-									{/if}
-								</td>
-								<td class="py-1.5 text-xs text-hull-grey max-w-[200px] truncate" title={entry.details ?? ""}>{entry.details ?? ""}</td>
+								{#if ledgerMode !== "credits"}
+									<td class="py-1.5 pr-3 text-xs text-chrome-silver">{entry.itemName ?? entry.itemId ?? "--"}</td>
+									<td class="py-1.5 pr-3 text-xs text-right mono text-star-white">{entry.quantity != null ? entry.quantity.toLocaleString() : "--"}</td>
+								{/if}
+								{#if ledgerMode !== "items"}
+									<td class="py-1.5 pr-3 text-xs text-right mono {(entry.credits ?? 0) > 0 ? 'text-bio-green' : (entry.credits ?? 0) < 0 ? 'text-claw-red' : 'text-hull-grey'}">
+										{#if entry.credits != null}
+											{entry.credits > 0 ? '+' : ''}{entry.credits.toLocaleString()}
+										{:else}
+											--
+										{/if}
+									</td>
+								{/if}
+								{#if ledgerMode === "credits"}
+									<td class="py-1.5 pr-3 text-xs text-right mono {(entry.balance ?? 0) >= 0 ? 'text-star-white' : 'text-claw-red'}">
+										{entry.balance != null ? entry.balance.toLocaleString() : "--"}
+									</td>
+								{/if}
+								<td class="py-1.5 text-xs text-hull-grey max-w-[250px] truncate" title={entry.details ?? ""}>{entry.details ?? ""}</td>
 							</tr>
 						{/each}
 					</tbody>
