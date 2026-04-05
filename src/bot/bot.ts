@@ -587,7 +587,8 @@ export class Bot {
       await this.stopRoutine();
     }
 
-    if (this._status !== "ready") {
+    // Accept both "ready" and "idle" — bots may be idle after login or service restart
+    if (this._status !== "ready" && this._status !== "idle") {
       throw new Error(`Cannot assign routine from state: ${this._status}`);
     }
 
