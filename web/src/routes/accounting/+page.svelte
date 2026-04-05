@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from "svelte";
-	import { bots, factionState, getAuthHeaders } from "$stores/websocket";
+	import { bots, factionState, fleetStats, getAuthHeaders } from "$stores/websocket";
 
 	interface LedgerEntry {
 		timestamp: number;
@@ -78,8 +78,10 @@
 		return entries;
 	});
 
-	// Current faction treasury balance (live from WebSocket)
+	// Live balances from WebSocket
 	const currentTreasury = $derived($factionState?.credits ?? 0);
+	const totalBotCredits = $derived($fleetStats?.totalCredits ?? 0);
+	const totalBalance = $derived(currentTreasury + totalBotCredits);
 
 	// Ending balance = current treasury. Starting = ending - net change in period.
 	const endingBalance = $derived(currentTreasury);
@@ -156,26 +158,36 @@
 
 	<!-- Summary cards -->
 	{#if ledgerMode === "credits"}
-		<div class="grid grid-cols-2 md:grid-cols-5 gap-3">
+		<div class="grid grid-cols-2 md:grid-cols-3 gap-3">
 			<div class="card p-4">
-				<p class="text-xs text-chrome-silver uppercase tracking-wider">Starting</p>
-				<p class="text-lg font-bold mono text-star-white mt-1">{startingBalance.toLocaleString()} cr</p>
+				<p class="text-xs text-chrome-silver uppercase tracking-wider">Faction Treasury</p>
+				<p class="text-xl font-bold mono text-star-white mt-1">{currentTreasury.toLocaleString()} cr</p>
 			</div>
 			<div class="card p-4">
-				<p class="text-xs text-chrome-silver uppercase tracking-wider">Total Debits</p>
-				<p class="text-lg font-bold mono text-claw-red mt-1">-{Math.abs(summary.totalExpense).toLocaleString()} cr</p>
+				<p class="text-xs text-chrome-silver uppercase tracking-wider">Bot Wallets</p>
+				<p class="text-xl font-bold mono text-star-white mt-1">{totalBotCredits.toLocaleString()} cr</p>
 			</div>
 			<div class="card p-4">
-				<p class="text-xs text-chrome-silver uppercase tracking-wider">Total Credits</p>
-				<p class="text-lg font-bold mono text-bio-green mt-1">+{summary.totalIncome.toLocaleString()} cr</p>
+				<p class="text-xs text-chrome-silver uppercase tracking-wider">Total Balance</p>
+				<p class="text-xl font-bold mono text-plasma-cyan mt-1">{totalBalance.toLocaleString()} cr</p>
 			</div>
-			<div class="card p-4">
-				<p class="text-xs text-chrome-silver uppercase tracking-wider">Net Change</p>
-				<p class="text-lg font-bold mono {summary.net >= 0 ? 'text-bio-green' : 'text-claw-red'} mt-1">{summary.net >= 0 ? '+' : ''}{summary.net.toLocaleString()} cr</p>
+		</div>
+		<div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+			<div class="card p-3">
+				<p class="text-[10px] text-chrome-silver uppercase tracking-wider">Period Start</p>
+				<p class="text-sm font-bold mono text-star-white mt-1">{startingBalance.toLocaleString()} cr</p>
 			</div>
-			<div class="card p-4">
-				<p class="text-xs text-chrome-silver uppercase tracking-wider">Ending</p>
-				<p class="text-lg font-bold mono {endingBalance >= 0 ? 'text-star-white' : 'text-claw-red'} mt-1">{endingBalance.toLocaleString()} cr</p>
+			<div class="card p-3">
+				<p class="text-[10px] text-chrome-silver uppercase tracking-wider">Debits</p>
+				<p class="text-sm font-bold mono text-claw-red mt-1">-{Math.abs(summary.totalExpense).toLocaleString()} cr</p>
+			</div>
+			<div class="card p-3">
+				<p class="text-[10px] text-chrome-silver uppercase tracking-wider">Credits</p>
+				<p class="text-sm font-bold mono text-bio-green mt-1">+{summary.totalIncome.toLocaleString()} cr</p>
+			</div>
+			<div class="card p-3">
+				<p class="text-[10px] text-chrome-silver uppercase tracking-wider">Period End</p>
+				<p class="text-sm font-bold mono text-star-white mt-1">{endingBalance.toLocaleString()} cr</p>
 			</div>
 		</div>
 	{:else}
