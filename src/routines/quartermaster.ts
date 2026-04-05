@@ -1569,6 +1569,16 @@ async function* manageFactionFacilities(
   const allMaterialNeeds = new Map<string, number>();
 
   // ── Build missing essential facilities ──
+  // Skip if treasury is too low — facility builds cost 100K-250K+
+  const MIN_TREASURY_FOR_BUILD = 150_000;
+  if (factionCredits < MIN_TREASURY_FOR_BUILD) {
+    const nextFacility = ESSENTIAL_FACILITIES.find(f => !existingTypes.has(f));
+    if (nextFacility) {
+      yield `facility builds paused — treasury ${factionCredits.toLocaleString()}cr < ${MIN_TREASURY_FOR_BUILD.toLocaleString()}cr minimum`;
+    }
+    return;
+  }
+
   for (const facilityType of ESSENTIAL_FACILITIES) {
     if (ctx.shouldStop) return;
     if (existingTypes.has(facilityType)) continue;

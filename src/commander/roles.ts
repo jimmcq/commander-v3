@@ -48,7 +48,7 @@ const ROLE_CORE_ROUTINES: Record<BotRole, RoutineName[]> = {
   gas_harvester:  ["harvester"],
   ice_harvester:  ["harvester"],
   explorer:       ["explorer", "scout"],
-  trader:         ["trader"],
+  trader:         ["trader", "miner"],
   crafter:        ["crafter", "miner"],
   quartermaster:  ["quartermaster"],
   hunter:         ["hunter", "salvager"],
