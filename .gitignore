@@ -16,3 +16,4 @@ config.toml
 
 # Claude Code project data
 .claude/
+nul/
