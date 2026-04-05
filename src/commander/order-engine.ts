@@ -1184,6 +1184,9 @@ export class OrderEngine {
     for (const order of candidates) {
       const routine = this.wom.getRoutineForOrder(order);
 
+      // Bot-specific orders: targetId ending with :botId can only be claimed by that bot
+      if (order.targetId.includes(":") && !order.targetId.endsWith(`:${bot.botId}`)) continue;
+
       // Role constraint: specialist bots can only run allowed routines
       if (allowedRoutines && !allowedRoutines.has(routine)) continue;
 

@@ -33,6 +33,8 @@ export async function claimWorkOrder(
     if (pending.length === 0) continue;
 
     for (const order of pending) {
+      // Bot-specific orders: skip if not for this bot
+      if (order.targetId.includes(":") && !order.targetId.endsWith(`:${ctx.botId}`)) continue;
       const claimed = await wom.claim(order.id, ctx.botId);
       if (claimed) {
         return claimed;
