@@ -57,16 +57,22 @@ const MODULE_MIN_PRICES: Record<string, number> = {
 };
 
 // Strategic crafting materials — never sell from faction storage
+// Items NEVER sold — no safe threshold, always needed for crafting/facilities
 const PROTECTED_MATERIALS = new Set([
-  "focused_crystal", "circuit_board", "titanium_alloy",
-  "steel_plate", "copper_wiring",
-  "power_battery", "ceramite_plating",
-  "silver_wiring", "premium_fuel_cell",
-  "trade_cipher", "trade_crystal", "optical_fiber_bundle",
-  "flex_polymer", "silicon_ore",
-  "compressed_hydrogen", "liquid_hydrogen",
-  // phase_crystal, quantum_fragments: moved to CONSUMABLE_RESERVES (sell excess above reserve)
-  // sensor_array, thruster_nozzle: removed — these are high-value crafted goods for sale
+  "focused_crystal",       // Sensor arrays, shield emitters — always scarce
+  "circuit_board",         // Facilities need 350 total
+  "optical_fiber_bundle",  // Facilities need 200 total
+  "trade_cipher",          // Trade Ledger facility
+  "trade_crystal",         // Input for trade ciphers
+  "silicon_ore",           // Optical fiber input
+  "flex_polymer",          // Faction Workshop facility
+  "power_battery",         // Crafting chain input
+  "ceramite_plating",      // Facility material
+  "compressed_hydrogen",   // Fuel chain input
+  "liquid_hydrogen",       // Fuel chain input
+  // steel_plate, copper_wiring, titanium_alloy: moved to CONSUMABLE_RESERVES (sell excess)
+  // phase_crystal, quantum_fragments, energy_crystal: moved to CONSUMABLE_RESERVES
+  // silver_wiring, premium_fuel_cell: removed — can sell excess
 ]);
 
 // Items that look like ship modules (don't sell these from faction storage)
@@ -395,12 +401,17 @@ async function* manageFactionSales(
     if (PROTECTED_MATERIALS.has(s.itemId)) continue;
 
     // Consumable reserves — keep minimum stock, only sell excess
+    // Reserves must cover: strategic minStock + crafting pipeline buffer
+    // Only sell quantities ABOVE these thresholds
     const CONSUMABLE_RESERVES: Record<string, number> = {
       fuel_cell: 500, fuel_cell_premium: 50, repair_kit: 100,
       purified_water: 500,
-      phase_crystal: 200,      // Reserve for crafting, sell excess (NPC buys at 5150cr!)
-      quantum_fragments: 200,  // Reserve for crafting, sell excess (NPC buys at 465cr)
-      energy_crystal: 300,     // Reserve for fuel cells + circuit boards, sell excess
+      phase_crystal: 1000,      // Crafting (focused crystals) + strategic reserve
+      quantum_fragments: 1000,  // Rare material, keep substantial buffer
+      energy_crystal: 1000,     // Fuel cells (1/batch) + circuit boards (1/batch) + optical fiber
+      steel_plate: 500,         // Fuel cells + hull plating + facility builds
+      copper_wiring: 500,       // Superconductors + crafting chains
+      titanium_alloy: 200,      // Hull plating + reinforced bulkheads
     };
     if (s.itemId in CONSUMABLE_RESERVES) {
       const reserve = CONSUMABLE_RESERVES[s.itemId];

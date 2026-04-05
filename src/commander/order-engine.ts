@@ -73,23 +73,25 @@ const REVENUE_ORES: Record<string, { minStock: number; sellValue: number }> = {
   palladium_ore: { minStock: 100, sellValue: 50 },
 };
 
-/** Items that should NEVER be sold — needed for crafting/facilities */
+/** Items that should NEVER be sold by the order engine sell tier.
+ *  QM handles its own reserves via CONSUMABLE_RESERVES + PROTECTED_MATERIALS. */
 const DO_NOT_SELL = new Set([
-  "energy_crystal",    // Needed for optical fiber + circuit boards
-  "silicon_ore",       // Needed for optical fiber
-  "circuit_board",     // Needed for facilities (350 total)
-  "optical_fiber_bundle", // Needed for facilities (200 total)
-  // fuel_cell: handled by QM's CONSUMABLE_RESERVES (500 reserve, sells excess)
-  "repair_kit",        // Keep for bot field repairs
-  "trade_cipher",      // Needed for Trade Ledger
-  "trade_crystal",     // Input for trade ciphers
-  "flex_polymer",      // Needed for Faction Workshop
-  "steel_plate",       // Needed for facility builds
+  "silicon_ore",           // Optical fiber input
+  "circuit_board",         // Facilities (350 total)
+  "optical_fiber_bundle",  // Facilities (200 total)
+  "trade_cipher",          // Trade Ledger facility
+  "trade_crystal",         // Input for trade ciphers
+  "flex_polymer",          // Faction Workshop facility
+  "focused_crystal",       // Sensor arrays, shield emitters
+  // Items with reserves (QM handles via CONSUMABLE_RESERVES):
+  // energy_crystal, phase_crystal, quantum_fragments, steel_plate,
+  // copper_wiring, titanium_alloy, fuel_cell — sell excess above reserve
 ]);
 
-/** Tier 4: Bulk — low value, don't mine unless actually needed */
-const BULK_ORES = new Set(["nickel_ore", "carbon_ore", "aluminum_ore", "vanadium_ore", "iridium_ore", "tungsten_ore"]);
-const BULK_MIN_STOCK = 5000; // Only mine if below this
+/** Tier 4: Bulk — low value, don't actively mine (keep 50K reserve, sell excess) */
+const BULK_ORES = new Set(["nickel_ore", "carbon_ore", "aluminum_ore", "vanadium_ore", "tungsten_ore"]);
+// iridium_ore removed — now strategic (superconductor chain)
+const BULK_MIN_STOCK = 50_000; // Reserve threshold — sell excess above this, don't actively mine
 
 /** Market insight cache TTL */
 const INSIGHT_TTL_MS = 2 * 60 * 60 * 1000; // 2 hours
@@ -584,18 +586,16 @@ export class OrderEngine {
       });
     }
 
-    // ── TIER 4: BULK ORES (pri 25) — only if actually low ──
+    // ── TIER 4: BULK ORES — disabled (we have 40-100K+). Only mine if critically low ──
     for (const oreId of BULK_ORES) {
       const stock = this.factionInventory.get(oreId) ?? 0;
-      if (stock >= BULK_MIN_STOCK) continue;
-      // Only generate if stock is very low (< 1000) — we have 40-100K of most bulk ores
-      if (stock >= 1000) continue;
-
+      // Only mine if dangerously low — shouldn't happen with current stockpiles
+      if (stock >= 5000) continue;
       orders.push({
         type: "mine", targetId: oreId,
-        description: `Bulk: mine ${oreId.replace("_", " ")} (${stock} in stock)`,
-        priority: PRI.STANDING, reason: "bulk_low",
-        quantity: BULK_MIN_STOCK - stock, requiredModule: "mining_laser",
+        description: `CRITICAL: bulk ${oreId.replace("_", " ")} very low (${stock})`,
+        priority: PRI.STANDING, reason: "bulk_critical",
+        quantity: 5000 - stock, requiredModule: "mining_laser",
       });
     }
 
@@ -687,21 +687,21 @@ export class OrderEngine {
 
     // ── 2. HIGH-VALUE CRAFTING (pri 75-78) — craft components for sale ──
     const HIGH_VALUE_RECIPES: Array<{
-      recipe: string; description: string; value: number; priority: number;
+      recipe: string; outputItem: string; description: string; value: number; priority: number;
       inputs: Array<{ id: string; qty: number }>;
     }> = [
-      { recipe: "create_superconductor", description: "Superconductor", value: 560, priority: PRI.CRAFT + 6,
+      { recipe: "create_superconductor", outputItem: "superconductor", description: "Superconductor", value: 560, priority: PRI.CRAFT + 6,
         inputs: [{ id: "palladium_ore", qty: 2 }, { id: "iridium_ore", qty: 1 }, { id: "copper_wiring", qty: 3 }] },
-      { recipe: "forge_hull_plating", description: "Hull Plating", value: 410, priority: PRI.CRAFT + 4,
+      { recipe: "forge_hull_plating", outputItem: "hull_plating", description: "Hull Plating", value: 410, priority: PRI.CRAFT + 4,
         inputs: [{ id: "steel_plate", qty: 4 }, { id: "titanium_alloy", qty: 1 }] },
-      { recipe: "construct_sensor_array", description: "Sensor Array", value: 760, priority: PRI.CRAFT + 5,
+      { recipe: "construct_sensor_array", outputItem: "sensor_array", description: "Sensor Array", value: 760, priority: PRI.CRAFT + 5,
         inputs: [{ id: "circuit_board", qty: 3 }, { id: "focused_crystal", qty: 1 }, { id: "palladium_ore", qty: 2 }] },
     ];
 
     for (const hv of HIGH_VALUE_RECIPES) {
       const hasAll = hv.inputs.every(inp => (this.factionInventory.get(inp.id) ?? 0) >= inp.qty);
-      const outputStock = this.factionInventory.get(hv.recipe.replace(/^(create_|forge_|construct_|build_)/, "")) ?? 0;
-      if (hasAll && outputStock < 200) {
+      const outputStock = this.factionInventory.get(hv.outputItem) ?? 0;
+      if (hasAll && outputStock < 500) {
         const maxBatch = Math.min(10, ...hv.inputs.map(inp =>
           Math.floor((this.factionInventory.get(inp.id) ?? 0) / inp.qty)
         ));
@@ -1355,13 +1355,14 @@ export class OrderEngine {
 
   /** Synchronous claim fallback (WOM.claim is async due to Redis) */
   private claimOrderSync(orderId: string, botId: string): PersistentWorkOrder | null {
-    // Direct in-memory claim without Redis lock
     const order = this.wom.getAll().find(o => o.id === orderId);
     if (!order || order.status !== "pending") return null;
-    // Use the WOM's claim method — it returns a promise but we handle it
-    // For sync operation, manipulate the order directly via WOM
-    // This is a workaround — ideally we'd make the eval loop async-friendly
-    void this.wom.claim(orderId, botId); // Fire and forget the Redis sync
+    // Update in-memory status synchronously to prevent race conditions
+    order.status = "claimed";
+    order.claimedBy = botId;
+    order.claimedAt = Date.now();
+    // Fire Redis sync in background (non-blocking)
+    void this.wom.claim(orderId, botId).catch(() => {});
     return order;
   }
 

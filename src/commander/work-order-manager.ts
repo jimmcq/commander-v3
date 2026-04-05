@@ -154,11 +154,22 @@ export class WorkOrderManager {
     }
 
     // Remove non-chain orders whose target is no longer needed
-    const activeTargets = new Set(economyOrders.map(o => `${o.type}:${o.targetId}`));
+    // Also purge stale claimed orders for slots that no longer exist (maxConcurrent shrunk)
+    const expandedTargets = new Set<string>();
+    for (const ecoOrder of economyOrders) {
+      const slots = ecoOrder.maxConcurrent ?? 1;
+      if (slots <= 1) {
+        expandedTargets.add(`${ecoOrder.type}:${ecoOrder.targetId}`);
+      } else {
+        for (let i = 0; i < slots; i++) {
+          expandedTargets.add(`${ecoOrder.type}:${ecoOrder.targetId}#${i}`);
+        }
+      }
+    }
     for (const [id, order] of this.orders) {
-      if (order.chainId) continue; // Don't touch chain orders
+      if (order.chainId) continue;
       const key = `${order.type}:${order.targetId}`;
-      if (!activeTargets.has(key) && order.status === "pending") {
+      if (!expandedTargets.has(key) && (order.status === "pending" || order.status === "claimed")) {
         this.orders.delete(id);
       }
     }
