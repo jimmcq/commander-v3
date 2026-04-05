@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from "svelte";
-	import { bots, getAuthHeaders } from "$stores/websocket";
+	import { bots, factionState, getAuthHeaders } from "$stores/websocket";
 
 	interface LedgerEntry {
 		timestamp: number;
@@ -78,31 +78,30 @@
 		return entries;
 	});
 
-	// Running balance with starting/ending balance
-	const startingBalance = $derived.by(() => {
-		if (ledgerMode !== "credits") return 0;
-		// Starting balance = negative of all movements in period (what balance was before these transactions)
-		return 0; // We don't know the absolute balance, so start from 0
-	});
+	// Current faction treasury balance (live from WebSocket)
+	const currentTreasury = $derived($factionState?.credits ?? 0);
+
+	// Ending balance = current treasury. Starting = ending - net change in period.
+	const endingBalance = $derived(currentTreasury);
+	const startingBalance = $derived(endingBalance - summary.net);
 
 	const entriesWithBalance = $derived.by(() => {
 		if (ledgerMode !== "credits") return filteredEntries.map(e => ({ ...e, balance: null as number | null, debit: null as number | null, credit: null as number | null }));
-		const reversed = [...filteredEntries].reverse();
-		let balance = 0;
-		const withBal = reversed.map(e => {
+		// Build running balance: start from ending (newest) and work backwards
+		// Entries are newest-first, so subtract each entry's credits to go back in time
+		let balance = endingBalance;
+		return filteredEntries.map(e => {
 			const amt = e.credits ?? 0;
-			balance += amt;
-			return {
+			const row = {
 				...e,
 				debit: amt < 0 ? Math.abs(amt) : null,
 				credit: amt > 0 ? amt : null,
 				balance,
 			};
+			balance -= amt; // Undo this transaction to get previous balance
+			return row;
 		});
-		return withBal.reverse();
 	});
-
-	const endingBalance = $derived(entriesWithBalance.length > 0 ? (entriesWithBalance[0]?.balance ?? 0) : 0);
 
 	async function fetchLedger() {
 		loading = true;
@@ -119,15 +118,17 @@
 		loading = false;
 	}
 
+	let mounted = $state(false);
 	onMount(() => {
-		fetchLedger();
+		mounted = true;
 		const interval = setInterval(fetchLedger, 30000);
 		return () => clearInterval(interval);
 	});
 
+	// Fetch when filters change (only after mount)
 	$effect(() => {
 		range; botFilter; typeFilter;
-		fetchLedger();
+		if (mounted) fetchLedger();
 	});
 
 	const uniqueTypes = $derived.by(() => {
@@ -158,7 +159,7 @@
 		<div class="grid grid-cols-2 md:grid-cols-5 gap-3">
 			<div class="card p-4">
 				<p class="text-xs text-chrome-silver uppercase tracking-wider">Starting</p>
-				<p class="text-lg font-bold mono text-hull-grey mt-1">0 cr</p>
+				<p class="text-lg font-bold mono text-star-white mt-1">{startingBalance.toLocaleString()} cr</p>
 			</div>
 			<div class="card p-4">
 				<p class="text-xs text-chrome-silver uppercase tracking-wider">Total Debits</p>
@@ -263,10 +264,10 @@
 						{#if ledgerMode === "credits"}
 							<!-- Starting balance row -->
 							<tr class="bg-nebula-blue/10">
-								<td class="py-1.5 pr-3 text-xs text-hull-grey" colspan="3">Starting Balance</td>
+								<td class="py-1.5 pr-3 text-xs font-semibold text-star-white" colspan="3">Starting Balance</td>
 								<td class="py-1.5 pr-3"></td>
 								<td class="py-1.5 pr-3"></td>
-								<td class="py-1.5 pr-3 text-xs text-right mono text-hull-grey">0</td>
+								<td class="py-1.5 pr-3 text-xs text-right mono font-semibold text-star-white">{startingBalance.toLocaleString()}</td>
 								<td class="py-1.5"></td>
 							</tr>
 						{/if}
