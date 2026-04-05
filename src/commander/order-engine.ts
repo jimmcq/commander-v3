@@ -378,7 +378,10 @@ export class OrderEngine {
         });
       }
       // Low credits: below minimum — return home to withdraw
-      if (bot.credits < (this.config.minBotCredits || 0) && this.config.minBotCredits > 0) {
+      // Skip for traders/crafters — they earn credits by working, not by withdrawing
+      const earnerRoles = new Set(["trader", "crafter", "quartermaster"]);
+      const botRole = bot.role ?? "";
+      if (bot.credits < (this.config.minBotCredits || 0) && this.config.minBotCredits > 0 && !earnerRoles.has(botRole)) {
         orders.push({
           type: "deliver", targetId: `return_home:${bot.botId}`,
           description: `${bot.username} low credits (${bot.credits}/${this.config.minBotCredits})`,
