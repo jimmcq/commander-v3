@@ -1079,11 +1079,16 @@ export class OrderEngine {
       const existingOrders = ordersByRoutine.get(routine) ?? 0;
       const needed = Math.max(0, (botCount + MIN_ORDERS_PER_ROLE) - existingOrders);
 
+      // Get bot IDs for this role to create bot-specific fallback orders
+      const roleBotIds = bots.filter(b => (b.role ?? "ore_miner") === role).map(b => b.botId);
+
       for (let i = 0; i < needed; i++) {
+        // Assign fallback to specific bot if possible (prevents cross-role claiming)
+        const targetBotId = roleBotIds[i % roleBotIds.length];
         orders.push({
           type: routine === "miner" || routine === "harvester" ? "mine" : "explore",
-          targetId: `fallback_${role}_${i}`,
-          description: `Fallback ${routine} order (keep ${role} active)`,
+          targetId: `fallback_${role}_${i}:${targetBotId}`,
+          description: `Fallback ${routine} (${role.replace(/_/g, " ")})`,
           priority: PRI.FALLBACK,
           reason: "coverage_fallback",
           routineHint: routine as RoutineName,
