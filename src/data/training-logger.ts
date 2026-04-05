@@ -53,7 +53,7 @@ export class TrainingLogger {
       commanderVersion: COMMANDER_VERSION,
     }));
 
-    await this.db.insert(stateSnapshots).values(rows);
+    await (this.db as any).insert(stateSnapshots).values(rows);
   }
 
   async destroy(): Promise<void> {
@@ -78,7 +78,7 @@ export class TrainingLogger {
     commanderGoal?: string;
   }): Promise<void> {
     if (!this.enabled.decisions) return;
-    await this.db.insert(decisionLog).values({
+    await (this.db as any).insert(decisionLog).values({
       tenantId: this.tenantId,
       tick: params.tick,
       botId: params.botId,
@@ -112,7 +112,7 @@ export class TrainingLogger {
     commanderGoal?: string; success: boolean;
   }): Promise<void> {
     if (!this.enabled.episodes) return;
-    await this.db.insert(episodes).values({
+    await (this.db as any).insert(episodes).values({
       tenantId: this.tenantId,
       botId: params.botId,
       episodeType: params.episodeType,
@@ -154,7 +154,7 @@ export class TrainingLogger {
     }));
 
     try {
-      await this.db.insert(marketHistory).values(rows);
+      await (this.db as any).insert(marketHistory).values(rows);
     } catch (err) {
       // Non-critical — market history is supplementary data
       console.warn(`[TrainingLogger] logMarketPrices failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -168,7 +168,7 @@ export class TrainingLogger {
     reasoning: string;
     economyState?: Record<string, unknown>;
   }): Promise<void> {
-    await this.db.insert(commanderLog).values({
+    await (this.db as any).insert(commanderLog).values({
       tenantId: this.tenantId,
       tick: params.tick,
       goal: params.goal,
@@ -194,14 +194,14 @@ export class TrainingLogger {
 
   async logFinancialEvent(type: "revenue" | "cost", amount: number, botId?: string, source?: string): Promise<void> {
     if (amount <= 0) return;
-    await this.db.insert(financialEvents).values({
+    await (this.db as any).insert(financialEvents).values({
       tenantId: this.tenantId,
       timestamp: Date.now(), eventType: type, amount, botId: botId ?? null, source: source ?? null,
     });
   }
 
   async logFactionCreditTx(type: "credit_deposit" | "credit_withdraw", botId: string, amount: number, details?: string): Promise<void> {
-    await this.db.insert(factionTransactions).values({
+    await (this.db as any).insert(factionTransactions).values({
       tenantId: this.tenantId,
       timestamp: Date.now(), botId, type, credits: amount, details: details ?? null,
     });
@@ -217,7 +217,7 @@ export class TrainingLogger {
     credits?: number;
     details?: string;
   }): Promise<void> {
-    await this.db.insert(factionTransactions).values({
+    await (this.db as any).insert(factionTransactions).values({
       tenantId: this.tenantId,
       timestamp: Date.now(),
       type: entry.type,
@@ -235,7 +235,7 @@ export class TrainingLogger {
     timestamp: number; revenue: number; cost: number; profit: number;
   }>> {
     const since = Date.now() - sinceMs;
-    const rows = await this.db.execute(sql`
+    const rows = await (this.db as any).execute(sql`
       SELECT
         (${financialEvents.timestamp} / ${bucketMs} * ${bucketMs}) as bucket,
         SUM(CASE WHEN ${financialEvents.eventType} = 'revenue' THEN ${financialEvents.amount} ELSE 0 END) as revenue,
@@ -246,7 +246,7 @@ export class TrainingLogger {
       GROUP BY bucket ORDER BY bucket ASC
     `) as unknown as Array<{ bucket: number; revenue: number; cost: number }>;
 
-    return rows.map((r) => ({
+    return rows.map((r: any) => ({
       timestamp: r.bucket, revenue: r.revenue, cost: r.cost,
       profit: r.revenue - r.cost,
     }));
@@ -257,7 +257,7 @@ export class TrainingLogger {
     quantity: number; priceEach: number; total: number; stationId?: string;
   }): Promise<void> {
     try {
-      await this.db.insert(tradeLog).values({
+      await (this.db as any).insert(tradeLog).values({
         tenantId: this.tenantId,
         timestamp: Date.now(), botId: params.botId, action: params.action,
         itemId: params.itemId || "unknown", quantity: params.quantity || 0,
@@ -298,7 +298,7 @@ export class TrainingLogger {
     quantity: number; priceEach: number; total: number; stationId: string | null;
   }>> {
     const since = Date.now() - sinceMs;
-    const rows = await this.db.select().from(tradeLog)
+    const rows = await (this.db as any).select().from(tradeLog)
       .where(and(
         eq(tradeLog.tenantId, this.tenantId),
         gte(tradeLog.timestamp, since),
@@ -306,7 +306,7 @@ export class TrainingLogger {
       .orderBy(desc(tradeLog.timestamp))
       .limit(limit);
 
-    return rows.map((r) => ({
+    return rows.map((r: any) => ({
       timestamp: r.timestamp, botId: r.botId, action: r.action,
       itemId: r.itemId, quantity: r.quantity, priceEach: r.priceEach,
       total: r.total, stationId: r.stationId,
@@ -331,7 +331,7 @@ export class TrainingLogger {
     const totalBots = Math.max(pAssign.length, sAssign.length, 1);
     const agreementRate = matches / totalBots;
 
-    await this.db.insert(llmDecisions).values({
+    await (this.db as any).insert(llmDecisions).values({
       tenantId: this.tenantId,
       tick: params.tick,
       brainName: params.primary.brainName,
@@ -353,19 +353,19 @@ export class TrainingLogger {
     avgAgreementRate: number;
     byBrain: Array<{ brainName: string; count: number; avgAgreement: number; avgLatency: number }>;
   }> {
-    const totalRows = await this.db.execute(sql`
+    const totalRows = await (this.db as any).execute(sql`
       SELECT COUNT(*) as count FROM ${llmDecisions}
       WHERE ${llmDecisions.tenantId} = ${this.tenantId}
     `) as unknown as Array<{ count: number }>;
     const total = totalRows[0]?.count ?? 0;
 
-    const avgRows = await this.db.execute(sql`
+    const avgRows = await (this.db as any).execute(sql`
       SELECT AVG(${llmDecisions.agreementRate}) as avg FROM ${llmDecisions}
       WHERE ${llmDecisions.tenantId} = ${this.tenantId}
     `) as unknown as Array<{ avg: number | null }>;
     const avgRate = avgRows[0]?.avg ?? 0;
 
-    const byBrain = await this.db.execute(sql`
+    const byBrain = await (this.db as any).execute(sql`
       SELECT
         ${llmDecisions.brainName} as brain_name,
         COUNT(*) as count,
@@ -379,7 +379,7 @@ export class TrainingLogger {
     return {
       totalComparisons: total,
       avgAgreementRate: avgRate,
-      byBrain: byBrain.map(r => ({
+      byBrain: byBrain.map((r: any) => ({
         brainName: r.brain_name,
         count: r.count,
         avgAgreement: r.avg_agreement,
@@ -393,12 +393,12 @@ export class TrainingLogger {
     marketRecords: number; commanderDecisions: number; dbSizeBytes: number;
   }> {
     const [decisionsR, snapshotsR, episodesR, marketR, commanderR, sizeR] = await Promise.all([
-      this.db.execute(sql`SELECT COUNT(*) as count FROM ${decisionLog} WHERE ${decisionLog.tenantId} = ${this.tenantId}`) as unknown as Promise<Array<{ count: number }>>,
-      this.db.execute(sql`SELECT COUNT(*) as count FROM ${stateSnapshots} WHERE ${stateSnapshots.tenantId} = ${this.tenantId}`) as unknown as Promise<Array<{ count: number }>>,
-      this.db.execute(sql`SELECT COUNT(*) as count FROM ${episodes} WHERE ${episodes.tenantId} = ${this.tenantId}`) as unknown as Promise<Array<{ count: number }>>,
-      this.db.execute(sql`SELECT COUNT(*) as count FROM ${marketHistory} WHERE ${marketHistory.tenantId} = ${this.tenantId}`) as unknown as Promise<Array<{ count: number }>>,
-      this.db.execute(sql`SELECT COUNT(*) as count FROM ${commanderLog} WHERE ${commanderLog.tenantId} = ${this.tenantId}`) as unknown as Promise<Array<{ count: number }>>,
-      this.db.execute(sql`SELECT pg_database_size(current_database()) as size`) as unknown as Promise<Array<{ size: number }>>,
+      (this.db as any).execute(sql`SELECT COUNT(*) as count FROM ${decisionLog} WHERE ${decisionLog.tenantId} = ${this.tenantId}`) as unknown as Promise<Array<{ count: number }>>,
+      (this.db as any).execute(sql`SELECT COUNT(*) as count FROM ${stateSnapshots} WHERE ${stateSnapshots.tenantId} = ${this.tenantId}`) as unknown as Promise<Array<{ count: number }>>,
+      (this.db as any).execute(sql`SELECT COUNT(*) as count FROM ${episodes} WHERE ${episodes.tenantId} = ${this.tenantId}`) as unknown as Promise<Array<{ count: number }>>,
+      (this.db as any).execute(sql`SELECT COUNT(*) as count FROM ${marketHistory} WHERE ${marketHistory.tenantId} = ${this.tenantId}`) as unknown as Promise<Array<{ count: number }>>,
+      (this.db as any).execute(sql`SELECT COUNT(*) as count FROM ${commanderLog} WHERE ${commanderLog.tenantId} = ${this.tenantId}`) as unknown as Promise<Array<{ count: number }>>,
+      (this.db as any).execute(sql`SELECT pg_database_size(current_database()) as size`) as unknown as Promise<Array<{ size: number }>>,
     ]);
 
     return {
@@ -417,13 +417,13 @@ export class TrainingLogger {
     byBrain: Array<{ brainName: string; count: number; avgLatency: number; avgConfidence: number }>;
     recentBrainName: string | null;
   }> {
-    const totalRows = await this.db.execute(sql`
+    const totalRows = await (this.db as any).execute(sql`
       SELECT COUNT(*) as count FROM ${llmDecisions}
       WHERE ${llmDecisions.tenantId} = ${this.tenantId}
     `) as unknown as Array<{ count: number }>;
     const total = totalRows[0]?.count ?? 0;
 
-    const byBrain = await this.db.execute(sql`
+    const byBrain = await (this.db as any).execute(sql`
       SELECT
         ${llmDecisions.brainName} as brain_name,
         COUNT(*) as count,
@@ -435,7 +435,7 @@ export class TrainingLogger {
     `) as unknown as Array<{ brain_name: string; count: number; avg_latency: number; avg_confidence: number }>;
 
     // Most recent brain used
-    const recent = await this.db.execute(sql`
+    const recent = await (this.db as any).execute(sql`
       SELECT ${llmDecisions.brainName} as brain_name
       FROM ${llmDecisions}
       WHERE ${llmDecisions.tenantId} = ${this.tenantId}
@@ -445,7 +445,7 @@ export class TrainingLogger {
 
     return {
       total,
-      byBrain: byBrain.map(r => ({
+      byBrain: byBrain.map((r: any) => ({
         brainName: r.brain_name,
         count: r.count,
         avgLatency: Math.round(r.avg_latency ?? 0),

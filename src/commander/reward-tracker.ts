@@ -46,7 +46,7 @@ export class RewardTracker {
   /** Load persisted data on startup */
   async init(): Promise<void> {
     try {
-      const rows = await this.db.select().from(fleetSettings)
+      const rows = await (this.db as any).select().from(fleetSettings)
         .where(and(eq(fleetSettings.tenantId, this.tenantId), eq(fleetSettings.key, "reward_tracker")));
       if (rows.length > 0 && rows[0].value) {
         const parsed = JSON.parse(rows[0].value);
@@ -135,7 +135,7 @@ export class RewardTracker {
     if (this.data.size === 0) return;
     try {
       const json = JSON.stringify(Object.fromEntries(this.data));
-      await this.db.insert(fleetSettings)
+      await (this.db as any).insert(fleetSettings)
         .values({ tenantId: this.tenantId, key: "reward_tracker", value: json })
         .onConflictDoUpdate({
           target: [fleetSettings.tenantId, fleetSettings.key],

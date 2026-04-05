@@ -499,15 +499,14 @@ async function* exploreSystem(
           const isScarce = stock / STORAGE_CAP < 0.05;
           // Signal resource discovery to commander (for bandit reward)
           try {
-            const cmd = ctx.getFleetStatus?.()?.commander;
             // Use a simpler approach — emit via event bus
             ctx.eventBus.emit({
-              type: "resource_discovered" as any,
+              type: "resource_discovered",
               botId: ctx.botId,
               resourceId: res.resourceId,
               poiId: poi.id,
               scarce: isScarce,
-            });
+            } as any);
           } catch { /* non-critical */ }
         }
 

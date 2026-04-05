@@ -390,8 +390,8 @@ async function* listShipForSale(
       );
       const inDemand = isLowSupply || hasDemandInsight;
 
-      const catalogShip = ctx.cache.getCachedShipCatalog?.()?.find(
-        (s) => s.id === shipClass
+      const catalogShip = (await ctx.cache.getCachedShipCatalog?.())?.find(
+        (s: any) => s.id === shipClass
       );
       const basePrice = catalogShip?.basePrice ?? 50000;
 
@@ -455,9 +455,9 @@ async function* craftModulesForMarket(
   }
 
   // Find module recipes we can craft
-  const recipes = ctx.cache.getCachedRecipes?.() ?? [];
-  const moduleRecipes = (recipes ?? []).filter((r) =>
-    moduleOrders.some((o) => o.itemId === r.outputItem)
+  const recipes = (await ctx.cache.getCachedRecipes?.()) ?? [];
+  const moduleRecipes = (recipes ?? []).filter((r: any) =>
+    moduleOrders.some((o: any) => o.itemId === r.outputItem)
   );
 
   if (moduleRecipes.length === 0) {

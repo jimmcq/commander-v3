@@ -109,7 +109,7 @@ export async function startup(config: AppConfig): Promise<AppServices> {
   // ── Cleanup stale data ──
   try {
     const cutoff = Date.now() - 48 * 3_600_000; // 48 hours
-    await db.delete(activityLog).where(and(eq(activityLog.tenantId, tenantId), lt(activityLog.timestamp, cutoff)));
+    await (db as any).delete(activityLog).where(and(eq(activityLog.tenantId, tenantId), lt(activityLog.timestamp, cutoff)));
     console.log(`[Cleanup] Trimmed activity log entries older than 48h`);
   } catch { /* non-critical */ }
 
@@ -199,7 +199,7 @@ export async function startup(config: AppConfig): Promise<AppServices> {
         sqlite.exec("BEGIN");
         try {
           for (const entry of batch) {
-            await db.insert(activityLog).values({
+            await (db as any).insert(activityLog).values({
               tenantId,
               timestamp: entry.timestamp,
               level: entry.level,
@@ -215,7 +215,7 @@ export async function startup(config: AppConfig): Promise<AppServices> {
       } else {
         // PostgreSQL — insert all entries (Drizzle handles async)
         for (const entry of batch) {
-          await db.insert(activityLog).values({
+          await (db as any).insert(activityLog).values({
             tenantId,
             timestamp: entry.timestamp,
             level: entry.level,
@@ -313,8 +313,8 @@ export async function startup(config: AppConfig): Promise<AppServices> {
   eventBus.on("mine", (e) => commander.addBotSignal(e.botId, "mined", e.quantity));
   eventBus.on("craft", (e) => commander.addBotSignal(e.botId, "crafted", e.outputQuantity));
   eventBus.on("trade_sell", (e) => commander.addBotSignal(e.botId, "deposited", e.quantity)); // faction sell = deposit
-  eventBus.on("scan_market", (e) => commander.addBotSignal(e.botId, "scanned", 1));
-  eventBus.on("mission_complete", (e) => commander.addBotSignal(e.botId, "missions", 1));
+  eventBus.on("market_scan" as any, (e: any) => commander.addBotSignal(e.botId, "scanned", 1));
+  eventBus.on("cycle_complete" as any, (e: any) => { if (e.routine === "mission_runner") commander.addBotSignal(e.botId, "missions", 1); });
   eventBus.on("resource_discovered" as any, (e: any) => {
     commander.addResourceDiscovery(e.botId, e.scarce);
   });
@@ -453,7 +453,7 @@ export async function startup(config: AppConfig): Promise<AppServices> {
         const orders = await bot.api.viewOrders();
         const sellOrders = orders.filter((o: any) => o.type === "sell");
         for (const order of sellOrders) {
-          const id = order.itemId ?? order.item_id ?? "";
+          const id = order.itemId ?? (order as any).item_id ?? "";
           const isRaw = id.endsWith("_ore") || id.startsWith("ore_")
             || id.endsWith("_crystal") || id.includes("crystal")
             || id.includes("ice") || id.includes("gas");
@@ -461,7 +461,7 @@ export async function startup(config: AppConfig): Promise<AppServices> {
 
           if (isRaw || isFacilityNeeded) {
             try {
-              await bot.api.cancelOrder(order.id ?? order.order_id);
+              await bot.api.cancelOrder(order.id ?? (order as any).order_id);
               cancelled++;
               console.log(`[Cleanup] Cancelled sell order: ${bot.username} selling ${id} (${isRaw ? "raw material" : "facility need"})`);
             } catch { /* order may already be filled/cancelled */ }
@@ -519,7 +519,7 @@ export async function startup(config: AppConfig): Promise<AppServices> {
       (async () => {
         try {
           const since = Date.now() - 3_600_000; // Last hour
-          const recentLogs = await db.select().from(activityLog)
+          const recentLogs = await (db as any).select().from(activityLog)
             .where(gt(activityLog.timestamp, since))
             .orderBy(activityLog.timestamp)
             .limit(200);

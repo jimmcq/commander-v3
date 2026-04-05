@@ -308,7 +308,7 @@ export class Market {
       const systemId = this.galaxy.getSystemForBase(stationId);
       if (!systemId) continue;
       const system = this.galaxy.getSystem(systemId);
-      const empire = system?.faction ?? system?.empire ?? "unknown";
+      const empire = (system as any)?.faction ?? system?.empire ?? "unknown";
       if (empire && empire !== "unknown") stationEmpires.set(stationId, empire);
     }
 
@@ -364,7 +364,7 @@ export class Market {
             buyPrice: buyData.buyPrice,
             sellPrice: sellData.sellPrice,
             profitPerUnit,
-            margin,
+            profitPerTick: profitPerUnit / Math.max(1, jumps * 2 * 5 + 4),
             jumps,
             volume,
             tripProfitPerTick: tripProfit / Math.max(1, tripTicks),

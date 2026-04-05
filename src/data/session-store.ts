@@ -23,11 +23,11 @@ export class SessionStore {
   ) {}
 
   async listBots(): Promise<BotCredentials[]> {
-    const rows = await this.db
+    const rows = await (this.db as any)
       .select()
       .from(botSessions)
       .where(eq(botSessions.tenantId, this.tenantId));
-    return rows.map((r) => ({
+    return rows.map((r: any) => ({
       username: r.username,
       password: r.password,
       empire: r.empire,
@@ -38,7 +38,7 @@ export class SessionStore {
   }
 
   async getBot(username: string): Promise<BotCredentials | null> {
-    const rows = await this.db
+    const rows = await (this.db as any)
       .select()
       .from(botSessions)
       .where(
@@ -61,7 +61,7 @@ export class SessionStore {
   }
 
   async upsertBot(creds: Omit<BotCredentials, "sessionId" | "sessionExpiresAt">): Promise<void> {
-    await this.db
+    await (this.db as any)
       .insert(botSessions)
       .values({
         tenantId: this.tenantId,
@@ -82,7 +82,7 @@ export class SessionStore {
   }
 
   async updateSession(username: string, sessionId: string, expiresAt: string): Promise<void> {
-    await this.db
+    await (this.db as any)
       .update(botSessions)
       .set({ sessionId, sessionExpiresAt: expiresAt, updatedAt: new Date() })
       .where(
@@ -94,7 +94,7 @@ export class SessionStore {
   }
 
   async clearSession(username: string): Promise<void> {
-    await this.db
+    await (this.db as any)
       .update(botSessions)
       .set({ sessionId: null, sessionExpiresAt: null, updatedAt: new Date() })
       .where(
@@ -106,7 +106,7 @@ export class SessionStore {
   }
 
   async removeBot(username: string): Promise<boolean> {
-    const result = await this.db
+    const result = await (this.db as any)
       .delete(botSessions)
       .where(
         and(

@@ -943,11 +943,11 @@ export async function disposeCargo(ctx: BotContext): Promise<SellResult> {
       // Non-raw items (crafted goods, components, etc) → SELL for credits
       try {
         const result = await ctx.api.sell(item.itemId, qty);
-        const earned = Number(result.total ?? result.credits ?? 0);
+        const earned = Number(result.total ?? (result as any).credits ?? 0);
         if (earned > 0) {
           sellEarnings += earned;
           log(ctx, `sold ${qty}x ${item.itemId} for ${earned}cr`);
-          items.push({ itemId: item.itemId, quantity: qty, priceEach: Number(result.price_each ?? 0), total: earned });
+          items.push({ itemId: item.itemId, quantity: qty, priceEach: Number(result.priceEach ?? 0), total: earned });
           continue;
         }
       } catch { /* no buyer — fall through to deposit */ }
@@ -1668,7 +1668,7 @@ export async function* equipModulesForRoutine(
           }
         } else {
           // Check other known stations for this module
-          const remote = ctx.cache.findItemSeller(modPattern, ctx.player.credits - 1000);
+          const remote = await ctx.cache.findItemSeller(modPattern, ctx.player.credits - 1000);
           if (remote && remote.stationId !== ctx.player.dockedAtBase && canFitModule(ctx, remote.itemId).fits) {
             yield `no ${modPattern} locally — traveling to buy at remote station`;
             try {

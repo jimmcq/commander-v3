@@ -81,7 +81,7 @@ export class GameCache {
     const cached = await this.getTimed(`system:${systemId}`);
     if (cached) {
       // System is in timed cache (still within TTL) — check dedup window
-      const rows = await this.db.select({ fetchedAt: timedCache.fetchedAt }).from(timedCache)
+      const rows = await (this.db as any).select({ fetchedAt: timedCache.fetchedAt }).from(timedCache)
         .where(and(eq(timedCache.key, `system:${systemId}`), eq(timedCache.tenantId, this.tenantId)))
         .limit(1);
       const row = rows[0];
@@ -347,26 +347,26 @@ export class GameCache {
 
   private async getStatic(key: string, gameVersion?: string): Promise<string | null> {
     const rows = gameVersion
-      ? await this.db.select({ data: cache.data }).from(cache)
+      ? await (this.db as any).select({ data: cache.data }).from(cache)
           .where(and(eq(cache.key, key), eq(cache.gameVersion, gameVersion), eq(cache.tenantId, this.tenantId)))
           .limit(1)
-      : await this.db.select({ data: cache.data }).from(cache)
+      : await (this.db as any).select({ data: cache.data }).from(cache)
           .where(and(eq(cache.key, key), eq(cache.tenantId, this.tenantId)))
           .limit(1);
     return rows[0]?.data ?? null;
   }
 
   private async setStatic(key: string, data: string, gameVersion: string): Promise<void> {
-    await this.db.insert(cache).values({ tenantId: this.tenantId, key, data, gameVersion, fetchedAt: Date.now() })
+    await (this.db as any).insert(cache).values({ tenantId: this.tenantId, key, data, gameVersion, fetchedAt: Date.now() })
       .onConflictDoUpdate({ target: [cache.tenantId, cache.key], set: { data, gameVersion, fetchedAt: Date.now() } });
   }
 
   private async deleteStatic(key: string): Promise<void> {
-    await this.db.delete(cache).where(and(eq(cache.key, key), eq(cache.tenantId, this.tenantId)));
+    await (this.db as any).delete(cache).where(and(eq(cache.key, key), eq(cache.tenantId, this.tenantId)));
   }
 
   private async getAllByPrefix(prefix: string): Promise<Array<{ key: string; data: string }>> {
-    return await this.db.select({ key: cache.key, data: cache.data }).from(cache)
+    return await (this.db as any).select({ key: cache.key, data: cache.data }).from(cache)
       .where(and(like(cache.key, `${prefix}%`), eq(cache.tenantId, this.tenantId)));
   }
 
@@ -378,7 +378,7 @@ export class GameCache {
       const redisVal = await this.redis.getTimed(key);
       if (redisVal !== null) return redisVal;
     }
-    const rows = await this.db.select().from(timedCache)
+    const rows = await (this.db as any).select().from(timedCache)
       .where(and(eq(timedCache.key, key), eq(timedCache.tenantId, this.tenantId)))
       .limit(1);
     const row = rows[0];
@@ -392,12 +392,12 @@ export class GameCache {
     if (this.redis) {
       await this.redis.setTimed(key, data, ttlMs);
     }
-    await this.db.insert(timedCache).values({ tenantId: this.tenantId, key, data, fetchedAt: Date.now(), ttlMs })
+    await (this.db as any).insert(timedCache).values({ tenantId: this.tenantId, key, data, fetchedAt: Date.now(), ttlMs })
       .onConflictDoUpdate({ target: [timedCache.tenantId, timedCache.key], set: { data, fetchedAt: Date.now(), ttlMs } });
   }
 
   private async clearTimedByPattern(pattern: string): Promise<void> {
-    await this.db.delete(timedCache).where(and(like(timedCache.key, pattern), eq(timedCache.tenantId, this.tenantId)));
+    await (this.db as any).delete(timedCache).where(and(like(timedCache.key, pattern), eq(timedCache.tenantId, this.tenantId)));
   }
 
   // ── Galaxy Map (static, version-gated) ──
@@ -735,7 +735,7 @@ export class GameCache {
 
   /** Load persisted shipyard data from DB into memory (call on startup) */
   async loadShipyardData(): Promise<number> {
-    const rows = await this.db.select().from(timedCache)
+    const rows = await (this.db as any).select().from(timedCache)
       .where(and(like(timedCache.key, "shipyard:%"), eq(timedCache.tenantId, this.tenantId)));
     let count = 0;
     const now = Date.now();
@@ -760,7 +760,7 @@ export class GameCache {
     const MAX_STALE_AGE = 24 * 60 * 60 * 1000; // Use data up to 24h old on startup
     let markets = 0, insights = 0, systems = 0;
 
-    const rows = await this.db.select().from(timedCache)
+    const rows = await (this.db as any).select().from(timedCache)
       .where(eq(timedCache.tenantId, this.tenantId));
 
     for (const row of rows) {
@@ -856,7 +856,7 @@ export class GameCache {
   async loadRecentMarketData(): Promise<void> {
     try {
       const cutoff = Math.floor(Date.now() / 1000) - 86_400;
-      const rows = await this.db.select({
+      const rows = await (this.db as any).select({
         stationId: marketHistory.stationId,
         itemId: marketHistory.itemId,
         buyPrice: marketHistory.buyPrice,
@@ -881,7 +881,7 @@ export class GameCache {
         if (!entry) { entry = { prices: [], latestTick: 0 }; byStation.set(row.stationId, entry); }
         entry.prices.push({
           itemId: row.itemId,
-          itemName: row.itemId.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()),
+          itemName: row.itemId.replace(/_/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase()),
           buyPrice: row.buyPrice, sellPrice: row.sellPrice,
           buyVolume: row.buyVolume ?? 0, sellVolume: row.sellVolume ?? 0,
         });
@@ -932,17 +932,17 @@ export class GameCache {
 
   /** Get all currently unsellable item IDs */
   async getUnsellableItems(): Promise<string[]> {
-    const rows = await this.db.select({ key: timedCache.key, data: timedCache.data, fetchedAt: timedCache.fetchedAt, ttlMs: timedCache.ttlMs })
+    const rows = await (this.db as any).select({ key: timedCache.key, data: timedCache.data, fetchedAt: timedCache.fetchedAt, ttlMs: timedCache.ttlMs })
       .from(timedCache).where(and(like(timedCache.key, "unsellable:%"), eq(timedCache.tenantId, this.tenantId)));
     const now = Date.now();
     return rows
-      .filter((r) => now - r.fetchedAt <= r.ttlMs)
-      .map((r) => r.key.replace("unsellable:", ""));
+      .filter((r: any) => now - r.fetchedAt <= r.ttlMs)
+      .map((r: any) => r.key.replace("unsellable:", ""));
   }
 
   /** Clear unsellable status for an item (e.g., when market conditions change) */
   async clearUnsellable(itemId: string): Promise<void> {
-    await this.db.delete(timedCache).where(and(eq(timedCache.key, `unsellable:${itemId}`), eq(timedCache.tenantId, this.tenantId)));
+    await (this.db as any).delete(timedCache).where(and(eq(timedCache.key, `unsellable:${itemId}`), eq(timedCache.tenantId, this.tenantId)));
   }
 
   // ── Facility-only Recipes (prevents crafters from retrying known facility-only recipes) ──
@@ -959,7 +959,7 @@ export class GameCache {
 
   /** Get all known facility-only recipe IDs */
   async getFacilityOnlyRecipes(): Promise<string[]> {
-    return (await this.getAllByPrefix("facility_only:")).map((r) => r.key.replace("facility_only:", ""));
+    return (await this.getAllByPrefix("facility_only:")).map((r: any) => r.key.replace("facility_only:", ""));
   }
 
   /** Temporarily blacklist a recipe that failed to craft (10 min TTL) */
@@ -975,12 +975,12 @@ export class GameCache {
   /** Get all currently-failed recipe IDs (respects TTL) */
   async getFailedRecipes(): Promise<string[]> {
     const prefix = "recipe_failed:";
-    const rows = await this.db.select({ key: timedCache.key, fetchedAt: timedCache.fetchedAt, ttlMs: timedCache.ttlMs })
+    const rows = await (this.db as any).select({ key: timedCache.key, fetchedAt: timedCache.fetchedAt, ttlMs: timedCache.ttlMs })
       .from(timedCache).where(and(like(timedCache.key, `${prefix}%`), eq(timedCache.tenantId, this.tenantId)));
     const now = Date.now();
     return rows
-      .filter((r) => now - r.fetchedAt <= r.ttlMs)
-      .map((r) => r.key.replace(prefix, ""));
+      .filter((r: any) => now - r.fetchedAt <= r.ttlMs)
+      .map((r: any) => r.key.replace(prefix, ""));
   }
 
   // ── Material Unavailability (per-bot, persists across routine restarts) ──
@@ -998,12 +998,12 @@ export class GameCache {
   /** Get all unavailable material IDs for a specific bot */
   async getUnavailableMaterials(botId: string): Promise<string[]> {
     const prefix = `material_unavail:${botId}:`;
-    const rows = await this.db.select({ key: timedCache.key, fetchedAt: timedCache.fetchedAt, ttlMs: timedCache.ttlMs })
+    const rows = await (this.db as any).select({ key: timedCache.key, fetchedAt: timedCache.fetchedAt, ttlMs: timedCache.ttlMs })
       .from(timedCache).where(and(like(timedCache.key, `${prefix}%`), eq(timedCache.tenantId, this.tenantId)));
     const now = Date.now();
     return rows
-      .filter((r) => now - r.fetchedAt <= r.ttlMs)
-      .map((r) => r.key.replace(prefix, ""));
+      .filter((r: any) => now - r.fetchedAt <= r.ttlMs)
+      .map((r: any) => r.key.replace(prefix, ""));
   }
 
   // ── Facility Material Needs (shared across QM, crafters, traders) ──
@@ -1027,15 +1027,15 @@ export class GameCache {
   async clearMarketCache(): Promise<void> { await this.clearTimedByPattern("market:%"); }
 
   async clearAllCache(): Promise<void> {
-    await this.db.delete(cache).where(eq(cache.tenantId, this.tenantId));
-    await this.db.delete(timedCache).where(eq(timedCache.tenantId, this.tenantId));
+    await (this.db as any).delete(cache).where(eq(cache.tenantId, this.tenantId));
+    await (this.db as any).delete(timedCache).where(eq(timedCache.tenantId, this.tenantId));
   }
 
   // ── POI Persistence (institutional memory across restarts) ──
 
   /** Persist a POI discovery (survives restarts, no TTL) */
   async persistPoi(poiId: string, systemId: string, poi: PoiSummary): Promise<void> {
-    await this.db.insert(poiCache).values({
+    await (this.db as any).insert(poiCache).values({
       tenantId: this.tenantId,
       poiId,
       systemId,
@@ -1053,7 +1053,7 @@ export class GameCache {
       // Don't overwrite existing POIs that have resource data with empty-resource versions
       // (get_system returns POIs with resources: [], get_poi fills in the real data)
       if (poi.resources.length === 0) {
-        const existingRows = await this.db.select({ data: poiCache.data }).from(poiCache)
+        const existingRows = await (this.db as any).select({ data: poiCache.data }).from(poiCache)
           .where(and(eq(poiCache.poiId, poi.id), eq(poiCache.tenantId, this.tenantId)))
           .limit(1);
         const existing = existingRows[0];
@@ -1070,7 +1070,7 @@ export class GameCache {
 
   /** Load all persisted POIs (for galaxy hydration on startup) */
   async loadPersistedPois(): Promise<Array<{ poiId: string; systemId: string; poi: PoiSummary }>> {
-    const rows = await this.db.select().from(poiCache).where(eq(poiCache.tenantId, this.tenantId));
+    const rows = await (this.db as any).select().from(poiCache).where(eq(poiCache.tenantId, this.tenantId));
     const results: Array<{ poiId: string; systemId: string; poi: PoiSummary }> = [];
     for (const row of rows) {
       try {
@@ -1082,7 +1082,7 @@ export class GameCache {
 
   /** Load persisted POIs for a specific system */
   async loadPersistedSystemPois(systemId: string): Promise<PoiSummary[]> {
-    const rows = await this.db.select().from(poiCache)
+    const rows = await (this.db as any).select().from(poiCache)
       .where(and(eq(poiCache.systemId, systemId), eq(poiCache.tenantId, this.tenantId)));
     const results: PoiSummary[] = [];
     for (const row of rows) {
@@ -1093,7 +1093,7 @@ export class GameCache {
 
   /** Find all belts containing a specific resource (searches persisted POI data) */
   async findBeltsWithResource(resourceId: string): Promise<Array<{ poiId: string; systemId: string; name: string; richness: number; remaining: number }>> {
-    const rows = await this.db.select().from(poiCache).where(eq(poiCache.tenantId, this.tenantId));
+    const rows = await (this.db as any).select().from(poiCache).where(eq(poiCache.tenantId, this.tenantId));
     const results: Array<{ poiId: string; systemId: string; name: string; richness: number; remaining: number }> = [];
     for (const row of rows) {
       try {
@@ -1116,7 +1116,7 @@ export class GameCache {
 
   /** Count persisted POIs */
   async getPersistedPoiCount(): Promise<number> {
-    const rows = await this.db.select({ count: sql<number>`count(*)` }).from(poiCache)
+    const rows = await (this.db as any).select({ count: sql<number>`count(*)` }).from(poiCache)
       .where(eq(poiCache.tenantId, this.tenantId));
     return rows[0]?.count ?? 0;
   }
@@ -1137,7 +1137,7 @@ export class GameCache {
 
   /** Clear a bot's checkpoint (call on clean routine completion) */
   async clearCheckpoint(botId: string): Promise<void> {
-    await this.db.delete(timedCache).where(and(eq(timedCache.key, `checkpoint:${botId}`), eq(timedCache.tenantId, this.tenantId)));
+    await (this.db as any).delete(timedCache).where(and(eq(timedCache.key, `checkpoint:${botId}`), eq(timedCache.tenantId, this.tenantId)));
   }
 
   async getCacheStatus(): Promise<Record<string, { cached: boolean; version: string | null }>> {

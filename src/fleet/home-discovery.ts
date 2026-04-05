@@ -203,8 +203,8 @@ export function propagateFleetHome(
 // ── Cache Helpers ──
 
 async function tryPersistentCache(db: DB, tenantId: string): Promise<DiscoveryResult | null> {
-  const [stationRow] = await db.select().from(cache).where(and(eq(cache.tenantId, tenantId), eq(cache.key, CACHE_KEY_FACTION_STORAGE))).limit(1);
-  const [systemRow] = await db.select().from(cache).where(and(eq(cache.tenantId, tenantId), eq(cache.key, CACHE_KEY_HOME_SYSTEM))).limit(1);
+  const [stationRow] = await (db as any).select().from(cache).where(and(eq(cache.tenantId, tenantId), eq(cache.key, CACHE_KEY_FACTION_STORAGE))).limit(1);
+  const [systemRow] = await (db as any).select().from(cache).where(and(eq(cache.tenantId, tenantId), eq(cache.key, CACHE_KEY_HOME_SYSTEM))).limit(1);
   if (!stationRow) return null;
 
   return {
@@ -221,7 +221,7 @@ async function persistCache(db: DB, result: DiscoveryResult, tenantId: string): 
     [CACHE_KEY_HOME_SYSTEM, result.systemId],
     [CACHE_KEY_HOME_BASE, result.stationId],
   ] as const) {
-    await db.insert(cache)
+    await (db as any).insert(cache)
       .values({ tenantId, key, data: value, fetchedAt: now })
       .onConflictDoUpdate({ target: [cache.tenantId, cache.key], set: { data: value, fetchedAt: now } });
   }
@@ -229,6 +229,6 @@ async function persistCache(db: DB, result: DiscoveryResult, tenantId: string): 
 
 async function clearCache(db: DB, tenantId: string): Promise<void> {
   for (const key of [CACHE_KEY_FACTION_STORAGE, CACHE_KEY_HOME_SYSTEM, CACHE_KEY_HOME_BASE]) {
-    await db.delete(cache).where(and(eq(cache.tenantId, tenantId), eq(cache.key, key)));
+    await (db as any).delete(cache).where(and(eq(cache.tenantId, tenantId), eq(cache.key, key)));
   }
 }

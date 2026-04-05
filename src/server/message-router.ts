@@ -89,14 +89,14 @@ export function handleClientMessage(
       }
 
       case "set_inventory_target": {
-        const eco = commander.getEconomy();
+        const eco = (commander as any).getEconomy();
         eco.addStockTarget(msg.target);
         broadcast({ type: "notification", level: "info", title: "Target set", message: `${msg.target.item_id} @ ${msg.target.station_id}` });
         break;
       }
 
       case "remove_inventory_target": {
-        const eco2 = commander.getEconomy();
+        const eco2 = (commander as any).getEconomy();
         eco2.removeStockTarget(msg.stationId, msg.itemId);
         broadcast({ type: "notification", level: "info", title: "Target removed", message: `${msg.itemId} @ ${msg.stationId}` });
         break;
@@ -432,10 +432,10 @@ export function handleClientMessage(
             const api = botManager.getAllBots().find(b => b.api)?.api;
             if (!api) {
               // No bot connected — serve from persisted cache
-              const ships = deps.cache.getCachedShipCatalog() ?? [];
-              const items = deps.cache.getCachedItemCatalog() ?? [];
-              const skills = deps.cache.getCachedSkillTree() ?? [];
-              const recipes = deps.cache.getCachedRecipes() ?? [];
+              const ships = await deps.cache.getCachedShipCatalog() ?? [];
+              const items = await deps.cache.getCachedItemCatalog() ?? [];
+              const skills = await deps.cache.getCachedSkillTree() ?? [];
+              const recipes = await deps.cache.getCachedRecipes() ?? [];
               sendTo(ws, { type: "catalog_data", ships, items, skills, recipes });
               return;
             }
@@ -448,10 +448,10 @@ export function handleClientMessage(
             sendTo(ws, { type: "catalog_data", ships, items, skills, recipes });
           } catch (err) {
             // Fetch failed — try serving from cache before returning empty
-            const ships = deps.cache.getCachedShipCatalog() ?? [];
-            const items = deps.cache.getCachedItemCatalog() ?? [];
-            const skills = deps.cache.getCachedSkillTree() ?? [];
-            const recipes = deps.cache.getCachedRecipes() ?? [];
+            const ships = await deps.cache.getCachedShipCatalog() ?? [];
+            const items = await deps.cache.getCachedItemCatalog() ?? [];
+            const skills = await deps.cache.getCachedSkillTree() ?? [];
+            const recipes = await deps.cache.getCachedRecipes() ?? [];
             sendTo(ws, { type: "catalog_data", ships, items, skills, recipes });
           }
         })();

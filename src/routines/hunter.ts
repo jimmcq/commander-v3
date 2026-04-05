@@ -269,8 +269,8 @@ export async function* hunter(ctx: BotContext): AsyncGenerator<RoutineYield, voi
       // Re-sort targets by threat level (prefer targets we can beat)
       const assessed = targets.map(t => ({
         target: t,
-        threat: assessThreat({ hull: t.hull, maxHull: t.maxHull, shields: t.shields, maxShields: t.maxShields, armor: t.armor, classId: t.shipClass }),
-        engagement: threatShouldEngage(ourStats, assessThreat({ hull: t.hull, maxHull: t.maxHull, shields: t.shields, maxShields: t.maxShields, armor: t.armor, classId: t.shipClass })),
+        threat: assessThreat({ hull: (t as any).hull, maxHull: (t as any).maxHull, shields: (t as any).shields, maxShields: (t as any).maxShields, armor: (t as any).armor, classId: t.shipClass }),
+        engagement: threatShouldEngage(ourStats, assessThreat({ hull: (t as any).hull, maxHull: (t as any).maxHull, shields: (t as any).shields, maxShields: (t as any).maxShields, armor: (t as any).armor, classId: t.shipClass })),
       })).filter(a => a.engagement.engage).sort((a, b) => a.threat.effectiveHp - b.threat.effectiveHp);
 
       if (assessed.length > 0) {

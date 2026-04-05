@@ -302,7 +302,7 @@ async function handleMarketData(url: URL, db: DB): Promise<Response> {
   const ms = RANGE_MS[range] ?? RANGE_MS["1d"];
   const since = Math.floor((Date.now() - ms) / 1000);
 
-  const rows = await db.select().from(marketHistory)
+  const rows = await (db as any).select().from(marketHistory)
     .where(gt(marketHistory.tick, since));
 
   // Group by station, keeping only latest price per item
@@ -324,7 +324,7 @@ async function handleMarketData(url: URL, db: DB): Promise<Response> {
     if (!existing || (r.tick ?? 0) > existing.tick) {
       station.priceMap.set(r.itemId, {
         itemId: r.itemId,
-        itemName: r.itemId.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase()),
+        itemName: r.itemId.replace(/_/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase()),
         buyPrice: r.buyPrice ?? 0,
         sellPrice: r.sellPrice ?? 0,
         buyVolume: r.buyVolume ?? 0,
@@ -348,12 +348,12 @@ async function handleCreditsRoute(url: URL, db: DB): Promise<Response> {
   const ms = RANGE_MS[range] ?? RANGE_MS["1h"];
   const since = Date.now() - ms;
 
-  const rows = await db.select().from(creditHistory)
+  const rows = await (db as any).select().from(creditHistory)
     .where(gt(creditHistory.timestamp, since));
 
   // Filter out restart dips: skip points where activeBots=0 or credits drops >50%
   let lastCredits = 0;
-  const filtered = rows.filter(r => {
+  const filtered = rows.filter((r: any) => {
     if (r.activeBots === 0) return false; // Bots not logged in yet after restart
     if (lastCredits > 0 && r.totalCredits < lastCredits * 0.5) return false; // Restart dip
     lastCredits = r.totalCredits;
@@ -361,7 +361,7 @@ async function handleCreditsRoute(url: URL, db: DB): Promise<Response> {
   });
 
   return Response.json(
-    filtered.map(r => ({
+    filtered.map((r: any) => ({
       time: new Date(Number(r.timestamp)).toISOString(),
       credits: r.totalCredits,
       factionCredits: (r as any).factionCredits ?? 0,
@@ -377,13 +377,13 @@ async function handleLogsRoute(url: URL, db: DB): Promise<Response> {
   const ms = RANGE_MS[range] ?? RANGE_MS["1h"];
   const since = Date.now() - ms;
 
-  const rows = await db.select().from(activityLog)
+  const rows = await (db as any).select().from(activityLog)
     .where(gt(activityLog.timestamp, since))
     .orderBy(desc(activityLog.timestamp))
     .limit(limit);
 
   return Response.json(
-    rows.map(r => ({
+    rows.map((r: any) => ({
       timestamp: new Date(r.timestamp).toISOString(),
       level: r.level,
       botId: r.botId,
@@ -399,13 +399,13 @@ async function handleDecisionsRoute(url: URL, db: DB): Promise<Response> {
   const limit = Math.min(parseInt(url.searchParams.get("limit") ?? "100") || 100, 500);
   const ms = RANGE_MS[range] ?? RANGE_MS["1d"];
 
-  const rows = await db.select().from(commanderLogTable)
+  const rows = await (db as any).select().from(commanderLogTable)
     .where(gt(commanderLogTable.tick, Math.floor((Date.now() - ms) / 1000)))
     .orderBy(desc(commanderLogTable.tick))
     .limit(limit);
 
   return Response.json(
-    rows.map(r => ({
+    rows.map((r: any) => ({
       tick: r.tick,
       goal: r.goal,
       assignments: JSON.parse(r.assignments),
@@ -434,12 +434,12 @@ async function handleFactionTransactionsRoute(url: URL, db: DB): Promise<Respons
     whereClause = and(whereClause, eq(factionTransactions.type, typeFilter))!;
   }
 
-  const rows = await db.select().from(factionTransactions)
+  const rows = await (db as any).select().from(factionTransactions)
     .where(whereClause)
     .orderBy(desc(factionTransactions.timestamp))
     .limit(limit);
 
-  const entries = rows.map(r => ({
+  const entries = rows.map((r: any) => ({
     timestamp: r.timestamp,
     botId: r.botId,
     type: r.type,
@@ -450,8 +450,8 @@ async function handleFactionTransactionsRoute(url: URL, db: DB): Promise<Respons
     details: r.details,
   }));
 
-  const totalIncome = entries.filter(e => (e.credits ?? 0) > 0).reduce((s, e) => s + (e.credits ?? 0), 0);
-  const totalExpense = entries.filter(e => (e.credits ?? 0) < 0).reduce((s, e) => s + (e.credits ?? 0), 0);
+  const totalIncome = entries.filter((e: any) => (e.credits ?? 0) > 0).reduce((s: number, e: any) => s + (e.credits ?? 0), 0);
+  const totalExpense = entries.filter((e: any) => (e.credits ?? 0) < 0).reduce((s: number, e: any) => s + (e.credits ?? 0), 0);
 
   return Response.json({
     entries,
@@ -491,14 +491,14 @@ async function handleMiningRateRoute(url: URL, db: DB): Promise<Response> {
   const ms = RANGE_MS[range] ?? RANGE_MS["1d"];
   const since = Date.now() - ms;
 
-  const allRows = await db.select({
+  const allRows = await (db as any).select({
     timestamp: activityLog.timestamp,
     botId: activityLog.botId,
     message: activityLog.message,
   }).from(activityLog)
     .where(gt(activityLog.timestamp, since));
 
-  const rows = allRows.filter(r => r.message?.includes("miner: mined") || r.message?.includes("harvester: harvested"));
+  const rows = allRows.filter((r: any) => r.message?.includes("miner: mined") || r.message?.includes("harvester: harvested"));
 
   const bucketMs = 3_600_000;
   const buckets = new Map<number, { total: number; byBot: Record<string, number>; byOre: Record<string, number> }>();
@@ -553,7 +553,7 @@ async function handleRegister(req: Request, opts: ServerOptions): Promise<Respon
     if (!db) return Response.json({ error: "Database not available" }, { status: 500 });
 
     // Check if username or email exists
-    const [existing] = await db.select().from(users).where(eq(users.username, username)).limit(1);
+    const [existing] = await (db as any).select().from(users).where(eq(users.username, username)).limit(1);
     if (existing) {
       return Response.json({ error: "Username already taken" }, { status: 409 });
     }
@@ -561,7 +561,7 @@ async function handleRegister(req: Request, opts: ServerOptions): Promise<Respon
     // Create user
     const userId = crypto.randomUUID();
     const passwordHash = await hashPassword(password);
-    await db.insert(users).values({
+    await (db as any).insert(users).values({
       id: userId,
       username,
       email,
@@ -604,7 +604,7 @@ async function handleLogin(req: Request, opts: ServerOptions): Promise<Response>
     if (!db) return Response.json({ error: "Database not available" }, { status: 500 });
 
     // Find user
-    const [user] = await db.select().from(users).where(eq(users.username, username)).limit(1);
+    const [user] = await (db as any).select().from(users).where(eq(users.username, username)).limit(1);
     if (!user) {
       return Response.json({ error: "Invalid credentials" }, { status: 401 });
     }
@@ -779,10 +779,10 @@ async function handlePublicLearning(opts: ServerOptions): Promise<Response> {
         durationSec: +Number(e.duration_sec).toFixed(0), botId: e.bot_id, createdAt: e.created_at,
       })),
       topCombos: topCombos ?? [],
-      rewardTrend: (rewardTrend ?? []).map(r => ({
+      rewardTrend: (rewardTrend ?? []).map((r: any) => ({
         hour: r.hour, episodes: +r.episodes, avgReward: +r.avg_reward, positivePct: +r.positive_pct,
       })),
-      roleRewardTrend: (roleRewardTrend ?? []).map(r => ({
+      roleRewardTrend: (roleRewardTrend ?? []).map((r: any) => ({
         role: r.role, hour: r.hour, episodes: +r.episodes, avgReward: +r.avg_reward,
       })),
       totals: totalRow ? { episodes: +totalRow.total, roles: +totalRow.roles, routines: +totalRow.routines, avgReward: +totalRow.avg_reward } : null,

@@ -21,7 +21,7 @@ export interface BotSettingsData {
 }
 
 export async function saveBotSettings(db: DB, tenantId: string, username: string, settings: BotSettingsData): Promise<void> {
-  await db.insert(botSettings)
+  await (db as any).insert(botSettings)
     .values({
       tenantId,
       username,
@@ -48,7 +48,7 @@ export async function saveBotSettings(db: DB, tenantId: string, username: string
 }
 
 export async function loadBotSettings(db: DB, tenantId: string, username: string): Promise<BotSettingsData | null> {
-  const rows = await db.select().from(botSettings)
+  const rows = await (db as any).select().from(botSettings)
     .where(and(eq(botSettings.tenantId, tenantId), eq(botSettings.username, username)))
     .limit(1);
   const row = rows[0];
@@ -72,7 +72,7 @@ export type BotSkillsData = Record<string, { level: number; xp: number; xpNext: 
 export async function saveBotSkills(db: DB, tenantId: string, username: string, skills: BotSkillsData): Promise<void> {
   const skillsStr = typeof skills === "string" ? skills : JSON.stringify(skills);
   const now = new Date().toISOString();
-  await db.insert(botSkills)
+  await (db as any).insert(botSkills)
     .values({
       tenantId,
       username,
@@ -89,7 +89,7 @@ export async function saveBotSkills(db: DB, tenantId: string, username: string, 
 }
 
 export async function loadBotSkills(db: DB, tenantId: string, username: string): Promise<BotSkillsData | null> {
-  const rows = await db.select().from(botSkills)
+  const rows = await (db as any).select().from(botSkills)
     .where(and(eq(botSkills.tenantId, tenantId), eq(botSkills.username, username)))
     .limit(1);
   const row = rows[0];
@@ -119,7 +119,7 @@ export interface FleetSettingsData {
 export async function saveFleetSettings(db: DB, tenantId: string, settings: FleetSettingsData): Promise<void> {
   for (const [key, value] of Object.entries(settings)) {
     const serialized = Array.isArray(value) ? JSON.stringify(value) : String(value);
-    await db.insert(fleetSettings)
+    await (db as any).insert(fleetSettings)
       .values({ tenantId, key, value: serialized })
       .onConflictDoUpdate({
         target: [fleetSettings.tenantId, fleetSettings.key],
@@ -129,26 +129,26 @@ export async function saveFleetSettings(db: DB, tenantId: string, settings: Flee
 }
 
 export async function loadFleetSettings(db: DB, tenantId: string): Promise<FleetSettingsData | null> {
-  const rows = await db.select().from(fleetSettings)
+  const rows = await (db as any).select().from(fleetSettings)
     .where(eq(fleetSettings.tenantId, tenantId));
   if (rows.length === 0) return null;
 
-  const map = new Map(rows.map(r => [r.key, r.value]));
+  const map = new Map(rows.map((r: any) => [r.key, r.value]));
 
   // Parse facilityBuildQueue from JSON
   let facilityBuildQueue: string[] | undefined;
   const rawQueue = map.get("facilityBuildQueue");
   if (rawQueue) {
-    try { facilityBuildQueue = JSON.parse(rawQueue); } catch { facilityBuildQueue = []; }
+    try { facilityBuildQueue = JSON.parse(rawQueue as string); } catch { facilityBuildQueue = []; }
   }
 
   return {
     factionTaxPercent: Number(map.get("factionTaxPercent") ?? 0),
     minBotCredits: Number(map.get("minBotCredits") ?? 0),
     maxBotCredits: Number(map.get("maxBotCredits") ?? 0),
-    homeSystem: map.get("homeSystem") ?? undefined,
-    homeBase: map.get("homeBase") ?? undefined,
-    defaultStorageMode: map.get("defaultStorageMode") ?? undefined,
+    homeSystem: (map.get("homeSystem") as string) ?? undefined,
+    homeBase: (map.get("homeBase") as string) ?? undefined,
+    defaultStorageMode: (map.get("defaultStorageMode") as string) ?? undefined,
     evaluationInterval: map.has("evaluationInterval") ? Number(map.get("evaluationInterval")) : undefined,
     reassignmentCooldown: map.has("reassignmentCooldown") ? Number(map.get("reassignmentCooldown")) : undefined,
     reassignmentThreshold: map.has("reassignmentThreshold") ? Number(map.get("reassignmentThreshold")) : undefined,
@@ -160,9 +160,9 @@ export async function loadFleetSettings(db: DB, tenantId: string): Promise<Fleet
 
 export async function saveGoals(db: DB, tenantId: string, goalList: Goal[]): Promise<void> {
   // Delete all for this tenant, re-insert
-  await db.delete(goals).where(eq(goals.tenantId, tenantId));
+  await (db as any).delete(goals).where(eq(goals.tenantId, tenantId));
   for (const g of goalList) {
-    await db.insert(goals)
+    await (db as any).insert(goals)
       .values({
         tenantId,
         type: g.type,
@@ -174,14 +174,14 @@ export async function saveGoals(db: DB, tenantId: string, goalList: Goal[]): Pro
 }
 
 export async function loadGoals(db: DB, tenantId: string): Promise<Goal[]> {
-  const rows = await db.select().from(goals)
+  const rows = await (db as any).select().from(goals)
     .where(eq(goals.tenantId, tenantId));
   return rows
-    .map(r => ({
+    .map((r: any) => ({
       type: r.type as Goal["type"],
       priority: r.priority,
       params: JSON.parse(r.params) as Record<string, unknown>,
       constraints: r.constraints ? JSON.parse(r.constraints) : undefined,
     }))
-    .sort((a, b) => b.priority - a.priority);
+    .sort((a: any, b: any) => b.priority - a.priority);
 }

@@ -232,7 +232,7 @@ export function startBroadcastLoop(deps: BroadcastDeps): () => void {
 
     // Credit history to DB (every 30s) — includes bot + faction credits
     if (tick % cfg.creditHistoryIntervalTicks === 0) {
-      await deps.db.insert(creditHistory)
+      await (deps.db as any).insert(creditHistory)
         .values({
           tenantId: deps.tenantId,
           timestamp: Date.now(),
@@ -255,7 +255,7 @@ export function startBroadcastLoop(deps: BroadcastDeps): () => void {
     if (tick % 600 === 0) {
       try {
         const cutoff = Date.now() - 24 * 60 * 60 * 1000;
-        await deps.db.delete(activityLog).where(lt(activityLog.timestamp, cutoff));
+        await (deps.db as any).delete(activityLog).where(lt(activityLog.timestamp, cutoff));
       } catch { /* non-critical */ }
     }
 
@@ -355,8 +355,8 @@ export function startBroadcastLoop(deps: BroadcastDeps): () => void {
 
       // Brain decision stats (LLM vs scoring breakdown)
       if (deps.trainingLogger) {
-        const decisionStats = deps.trainingLogger.getBrainDecisionStats();
-        const shadowStats = deps.trainingLogger.getShadowStats();
+        const decisionStats = await deps.trainingLogger.getBrainDecisionStats();
+        const shadowStats = await deps.trainingLogger.getShadowStats();
         broadcast({
           type: "brain_decision_stats",
           stats: {
@@ -442,8 +442,8 @@ export function startBroadcastLoop(deps: BroadcastDeps): () => void {
               quantity: wo.quantity,
               assignedBot: wo.claimedBy ?? routineBotMap.get(workOrderTypeToRoutine[wo.type] ?? "") ?? null,
             })),
-            completedOrders: orderEngine.getCompletedOrders(),
-          },
+            completedOrders: (orderEngine as any).getCompletedOrders?.() ?? [],
+          } as any,
         });
       }
     }

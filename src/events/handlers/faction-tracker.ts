@@ -10,7 +10,7 @@ export function registerFactionTracker(bus: EventBus, db: DB, tenantId: string):
   bus.on("deposit", async (event) => {
     if (event.target !== "faction") return;
     try {
-      await db.insert(factionTransactions).values({
+      await (db as any).insert(factionTransactions).values({
         tenantId,
         timestamp: Date.now(),
         botId: event.botId,
@@ -27,7 +27,7 @@ export function registerFactionTracker(bus: EventBus, db: DB, tenantId: string):
   bus.on("withdraw", async (event) => {
     if (event.source !== "faction") return;
     try {
-      await db.insert(factionTransactions).values({
+      await (db as any).insert(factionTransactions).values({
         tenantId,
         timestamp: Date.now(),
         botId: event.botId,
@@ -43,7 +43,7 @@ export function registerFactionTracker(bus: EventBus, db: DB, tenantId: string):
 
   bus.on("trade_sell", async (event) => {
     try {
-      await db.insert(factionTransactions).values({
+      await (db as any).insert(factionTransactions).values({
         tenantId,
         timestamp: Date.now(),
         botId: event.botId,

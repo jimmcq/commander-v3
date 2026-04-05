@@ -28,7 +28,7 @@ export class MemoryStore {
     const clampedImportance = Math.max(0, Math.min(10, importance));
     const now = new Date().toISOString();
 
-    await this.db
+    await (this.db as any)
       .insert(commanderMemory)
       .values({
         tenantId: this.tenantId,
@@ -49,7 +49,7 @@ export class MemoryStore {
 
   /** Get a specific memory */
   async get(key: string): Promise<MemoryFact | null> {
-    const rows = await this.db
+    const rows = await (this.db as any)
       .select()
       .from(commanderMemory)
       .where(
@@ -68,13 +68,13 @@ export class MemoryStore {
 
   /** Get all memories, sorted by importance desc */
   async getAll(): Promise<MemoryFact[]> {
-    const rows = await this.db
+    const rows = await (this.db as any)
       .select()
       .from(commanderMemory)
       .where(eq(commanderMemory.tenantId, this.tenantId))
       .orderBy(desc(commanderMemory.importance));
 
-    return rows.map((r) => ({
+    return rows.map((r: any) => ({
       ...r,
       updatedAt: String(r.updatedAt ?? new Date().toISOString()),
     }));
@@ -82,14 +82,14 @@ export class MemoryStore {
 
   /** Get top N memories by importance (for LLM context injection) */
   async getTop(n: number): Promise<MemoryFact[]> {
-    const rows = await this.db
+    const rows = await (this.db as any)
       .select()
       .from(commanderMemory)
       .where(eq(commanderMemory.tenantId, this.tenantId))
       .orderBy(desc(commanderMemory.importance))
       .limit(n);
 
-    return rows.map((r) => ({
+    return rows.map((r: any) => ({
       ...r,
       updatedAt: String(r.updatedAt ?? new Date().toISOString()),
     }));
@@ -97,7 +97,7 @@ export class MemoryStore {
 
   /** Delete a memory */
   async delete(key: string): Promise<void> {
-    await this.db
+    await (this.db as any)
       .delete(commanderMemory)
       .where(
         and(
@@ -109,7 +109,7 @@ export class MemoryStore {
 
   /** Get memory count */
   async count(): Promise<number> {
-    const rows = await this.db
+    const rows = await (this.db as any)
       .select({ count: sql<number>`count(*)` })
       .from(commanderMemory)
       .where(eq(commanderMemory.tenantId, this.tenantId));
