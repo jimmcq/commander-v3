@@ -690,12 +690,14 @@ export class OrderEngine {
       recipe: string; outputItem: string; description: string; value: number; priority: number;
       inputs: Array<{ id: string; qty: number }>;
     }> = [
+      { recipe: "build_power_cell", outputItem: "power_cell", description: "Power Cell", value: 2000, priority: PRI.CRAFT + 8,
+        inputs: [{ id: "circuit_board", qty: 2 }, { id: "energy_crystal", qty: 3 }, { id: "copper_wiring", qty: 2 }] },
       { recipe: "create_superconductor", outputItem: "superconductor", description: "Superconductor", value: 560, priority: PRI.CRAFT + 6,
         inputs: [{ id: "palladium_ore", qty: 2 }, { id: "iridium_ore", qty: 1 }, { id: "copper_wiring", qty: 3 }] },
-      { recipe: "forge_hull_plating", outputItem: "hull_plating", description: "Hull Plating", value: 410, priority: PRI.CRAFT + 4,
-        inputs: [{ id: "steel_plate", qty: 4 }, { id: "titanium_alloy", qty: 1 }] },
       { recipe: "construct_sensor_array", outputItem: "sensor_array", description: "Sensor Array", value: 760, priority: PRI.CRAFT + 5,
         inputs: [{ id: "circuit_board", qty: 3 }, { id: "focused_crystal", qty: 1 }, { id: "palladium_ore", qty: 2 }] },
+      { recipe: "forge_hull_plating", outputItem: "hull_plating", description: "Hull Plating", value: 410, priority: PRI.CRAFT + 4,
+        inputs: [{ id: "steel_plate", qty: 4 }, { id: "titanium_alloy", qty: 1 }] },
     ];
 
     for (const hv of HIGH_VALUE_RECIPES) {
