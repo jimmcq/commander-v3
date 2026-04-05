@@ -72,7 +72,7 @@
 			const params = new URLSearchParams({ range });
 			if (botFilter) params.set("bot", botFilter);
 			if (typeFilter) params.set("type", typeFilter);
-			const res = await fetch(`/api/economy/faction-transactions?${params}`, { headers: getAuthHeaders() });
+			const res = await fetch(`/api/faction/transactions?${params}`, { headers: getAuthHeaders() });
 			if (!res.ok) return;
 			const data: LedgerResponse = await res.json();
 			entries = data.entries;

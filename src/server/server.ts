@@ -425,12 +425,17 @@ async function handleFactionTransactionsRoute(url: URL, db: DB): Promise<Respons
   const ms = RANGE_MS[range] ?? RANGE_MS["1d"];
   const since = Date.now() - ms;
 
-  const conditions = [gt(factionTransactions.timestamp, since)];
-  if (botFilter) conditions.push(eq(factionTransactions.botId, botFilter));
-  if (typeFilter) conditions.push(eq(factionTransactions.type, typeFilter));
+  let whereClause = gt(factionTransactions.timestamp, since);
+  if (botFilter && typeFilter) {
+    whereClause = and(whereClause, eq(factionTransactions.botId, botFilter), eq(factionTransactions.type, typeFilter))!;
+  } else if (botFilter) {
+    whereClause = and(whereClause, eq(factionTransactions.botId, botFilter))!;
+  } else if (typeFilter) {
+    whereClause = and(whereClause, eq(factionTransactions.type, typeFilter))!;
+  }
 
   const rows = await db.select().from(factionTransactions)
-    .where(and(...conditions))
+    .where(whereClause)
     .orderBy(desc(factionTransactions.timestamp))
     .limit(limit);
 
