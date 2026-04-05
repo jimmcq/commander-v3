@@ -608,7 +608,18 @@ export class Bot {
     this._status = "running";
     this._routineStartedAt = Date.now();
 
-    // Build context
+    // Build context — ensure player/ship state is loaded first
+    if (!this._player || !this._ship) {
+      try {
+        const status = await this.deps!.api.getStatus();
+        this._player = status.player;
+        this._ship = status.ship;
+      } catch (err) {
+        this._status = "error";
+        this._error = `State not loaded: ${err instanceof Error ? err.message : String(err)}`;
+        throw new Error(this._error);
+      }
+    }
     const ctx = this.buildContext();
 
     // Set player status message (visible to other players) — fire-and-forget
