@@ -402,7 +402,7 @@ export class OrderEngine {
       if (bot.credits > maxCredits && bot.docked) {
         const excess = bot.credits - maxCredits;
         orders.push({
-          type: "deliver", targetId: "deposit_credits",
+          type: "deliver", targetId: `deposit_credits:${bot.botId}`,
           description: `${bot.username} excess credits (${bot.credits}/${maxCredits}) — deposit ${excess} to faction`,
           priority: PRI.MAINTENANCE - 5, reason: "excess_credits",
           quantity: excess,
@@ -426,7 +426,7 @@ export class OrderEngine {
       if (botModuleTypes.length < expectedModules.length && bot.routine !== "refit") {
         const missing = expectedModules.length - botModuleTypes.length;
         orders.push({
-          type: "deliver", targetId: "refit",
+          type: "deliver", targetId: `refit:${bot.botId}`,
           description: `Refit ${bot.username}: ${missing} module(s) missing for ${role}`,
           priority: PRI.MAINTENANCE, reason: "module_mismatch",
           routineHint: "refit",
