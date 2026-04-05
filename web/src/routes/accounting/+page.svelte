@@ -76,7 +76,7 @@
 	}
 
 	const filteredEntries = $derived.by(() => {
-		if (ledgerMode === "credits") return entries.filter(e => CREDIT_TYPES.has(e.type) || PENDING_TYPES.has(e.type));
+		if (ledgerMode === "credits") return entries.filter(e => CREDIT_TYPES.has(e.type));
 		if (ledgerMode === "items") return entries.filter(e => ITEM_TYPES.has(e.type));
 		return entries;
 	});
@@ -148,7 +148,7 @@
 
 	const uniqueTypes = $derived.by(() => {
 		const types = [...new Set(entries.map(e => e.type))].sort();
-		if (ledgerMode === "credits") return types.filter(t => CREDIT_TYPES.has(t) || PENDING_TYPES.has(t));
+		if (ledgerMode === "credits") return types.filter(t => CREDIT_TYPES.has(t));
 		if (ledgerMode === "items") return types.filter(t => ITEM_TYPES.has(t));
 		return types;
 	});
