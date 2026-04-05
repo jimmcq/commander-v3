@@ -222,16 +222,12 @@
 						<table class="w-full text-sm">
 							<thead>
 								<tr class="text-left text-xs text-chrome-silver uppercase tracking-wider border-b border-hull-grey/30">
-									<th class="pb-2 pr-4">Status</th>
 									<th class="pb-2 pr-4">Bot</th>
-									<th class="pb-2 pr-4">Role</th>
-									<th class="pb-2 pr-4">Ship</th>
-									<th class="pb-2 pr-4">Routine</th>
+									<th class="pb-2 pr-4">Order</th>
 									<th class="pb-2 pr-4">State</th>
 									<th class="pb-2 pr-4">Location</th>
 									<th class="pb-2 pr-4 text-right">Credits</th>
 									<th class="pb-2 pr-4 text-right">24h Rev</th>
-									<th class="pb-2 pr-4 text-right">Uptime</th>
 									<th class="pb-2 pr-4 text-right">Fuel</th>
 									<th class="pb-2 text-right">Cargo</th>
 								</tr>
@@ -240,65 +236,56 @@
 								{#each $bots as bot}
 									<tr class="hover:bg-nebula-blue/20 transition-colors">
 										<td class="py-2 pr-4">
-											<span
-												class="status-dot"
-												class:active={bot.status === "running"}
-												class:idle={bot.status === "idle" || bot.status === "ready"}
-												class:error={bot.status === "error"}
-												class:offline={bot.status === "stopping"}
-											></span>
-										</td>
-										<td class="py-2 pr-4">
-											<a href="/bots/{bot.id}" class="text-star-white hover:text-plasma-cyan font-medium">
-												{bot.username}
-											</a>
-										</td>
-										<td class="py-2 pr-4">
-											<span class="text-plasma-cyan text-[10px] px-1.5 py-0.5 rounded bg-plasma-cyan/10 border border-plasma-cyan/20">{roleLabel(bot.role)}</span>
-										</td>
-										<td class="py-2 pr-4 text-chrome-silver text-xs">
-											{bot.shipName ?? bot.shipClass ?? "--"}
-										</td>
-										<td class="py-2 pr-4">
-											{#if bot.routine}
+											<div class="flex items-center gap-2">
 												<span
-													class="inline-block px-2 py-0.5 rounded text-xs font-medium"
-													style="background: color-mix(in srgb, var(--color-routine-{bot.routine}) 20%, transparent); color: var(--color-routine-{bot.routine})"
-												>
-													{bot.routine}
-												</span>
+													class="status-dot flex-shrink-0"
+													class:active={bot.status === "running"}
+													class:idle={bot.status === "idle" || bot.status === "ready"}
+													class:error={bot.status === "error"}
+													class:offline={bot.status === "stopping"}
+												></span>
+												<a href="/bots/{bot.id}" class="text-star-white hover:text-plasma-cyan font-medium">
+													{bot.username}
+												</a>
+												{#if bot.role}
+													<span class="text-plasma-cyan text-[9px] px-1 py-0.5 rounded bg-plasma-cyan/10 border border-plasma-cyan/20 whitespace-nowrap">{roleLabel(bot.role)}</span>
+												{/if}
+												<span class="text-hull-grey text-[9px]">{bot.shipClass ?? ""}</span>
+											</div>
+										</td>
+										<td class="py-2 pr-4 text-xs max-w-[220px]">
+											{#if bot.orderDescription}
+												<span class="text-warning-yellow truncate block" title={bot.orderDescription}>{bot.orderDescription}</span>
+											{:else if bot.routine}
+												<span class="text-chrome-silver">{bot.routine}</span>
 											{:else}
 												<span class="text-hull-grey">--</span>
 											{/if}
 										</td>
-										<td class="py-2 pr-4 text-chrome-silver text-xs max-w-[350px]">
-											<span class="block truncate" title={bot.routineState || ""}>
-												{bot.routineState || "--"}
-											</span>
-										</td>
-										<td class="py-2 pr-4 text-chrome-silver text-xs">
-											{bot.systemName ?? "Unknown"}{#if bot.poiName}<span class="text-hull-grey"> - </span><span class="text-star-white">{bot.poiName}</span>{/if}
-											{#if bot.docked}
-												<span class="text-laser-blue ml-1">docked</span>
+										<td class="py-2 pr-4 text-xs max-w-[250px]">
+											{#if bot.jumpProgress}
+												<span class="text-plasma-cyan">Jump {bot.jumpProgress}{#if bot.destination} <span class="text-hull-grey">→</span> {bot.destination}{/if}</span>
+											{:else if bot.routineState}
+												<span class="text-chrome-silver truncate block" title={bot.routineState}>{bot.routineState}</span>
+											{:else}
+												<span class="text-hull-grey">{bot.status}</span>
 											{/if}
 										</td>
-										<td class="py-2 pr-4 text-right mono text-star-white">
+										<td class="py-2 pr-4 text-chrome-silver text-xs">
+											{bot.systemName ?? "?"}{#if bot.docked}<span class="text-bio-green ml-1">⚓</span>{/if}
+										</td>
+										<td class="py-2 pr-4 text-right mono text-star-white text-xs">
 											{bot.credits.toLocaleString()}
 										</td>
-										<td class="py-2 pr-4 text-right mono {(botRevenue24h[bot.id] ?? 0) >= 0 ? 'text-bio-green' : 'text-claw-red'}">
+										<td class="py-2 pr-4 text-right mono text-xs {(botRevenue24h[bot.id] ?? 0) >= 0 ? 'text-bio-green' : 'text-claw-red'}">
 											{(botRevenue24h[bot.id] ?? 0) >= 0 ? "+" : ""}{(botRevenue24h[bot.id] ?? 0).toLocaleString()}
 										</td>
-										<td class="py-2 pr-4 text-right mono" title="Session: {Math.round(bot.uptimePct ?? 0)}%">
-											<span class="{(bot.uptimePct1h ?? 0) >= 90 ? 'text-bio-green' : (bot.uptimePct1h ?? 0) >= 70 ? 'text-warning-yellow' : 'text-claw-red'}">
-												{Math.round(bot.uptimePct1h ?? 0)}%
-											</span>
-										</td>
-										<td class="py-2 pr-4 text-right mono">
+										<td class="py-2 pr-4 text-right mono text-xs">
 											<span class={bot.fuelPct < 20 ? "text-claw-red" : bot.fuelPct < 50 ? "text-warning-yellow" : "text-star-white"}>
 												{Math.round(bot.fuelPct)}%
 											</span>
 										</td>
-										<td class="py-2 text-right mono">
+										<td class="py-2 text-right mono text-xs">
 											<span class="text-star-white">{Math.round(bot.cargoPct)}%</span>
 										</td>
 									</tr>
