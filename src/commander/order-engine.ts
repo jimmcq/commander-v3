@@ -77,7 +77,7 @@ const DO_NOT_SELL = new Set([
   "silicon_ore",       // Needed for optical fiber
   "circuit_board",     // Needed for facilities (350 total)
   "optical_fiber_bundle", // Needed for facilities (200 total)
-  "fuel_cell",         // Keep for bot fuel reserves
+  // fuel_cell: handled by QM's CONSUMABLE_RESERVES (500 reserve, sells excess)
   "repair_kit",        // Keep for bot field repairs
   "trade_cipher",      // Needed for Trade Ledger
   "trade_crystal",     // Input for trade ciphers
@@ -683,7 +683,39 @@ export class OrderEngine {
       }
     }
 
-    // ── 2. SUPPLY CHAIN CRAFTING (pri 68-72) — ore surplus → refined goods ──
+    // ── 2. HIGH-VALUE CRAFTING (pri 75-78) — craft components for sale ──
+    const HIGH_VALUE_RECIPES: Array<{
+      recipe: string; description: string; value: number; priority: number;
+      inputs: Array<{ id: string; qty: number }>;
+    }> = [
+      { recipe: "create_superconductor", description: "Superconductor", value: 560, priority: PRI.CRAFT + 6,
+        inputs: [{ id: "palladium_ore", qty: 2 }, { id: "iridium_ore", qty: 1 }, { id: "copper_wiring", qty: 3 }] },
+      { recipe: "forge_hull_plating", description: "Hull Plating", value: 410, priority: PRI.CRAFT + 4,
+        inputs: [{ id: "steel_plate", qty: 4 }, { id: "titanium_alloy", qty: 1 }] },
+      { recipe: "construct_sensor_array", description: "Sensor Array", value: 760, priority: PRI.CRAFT + 5,
+        inputs: [{ id: "circuit_board", qty: 3 }, { id: "focused_crystal", qty: 1 }, { id: "palladium_ore", qty: 2 }] },
+    ];
+
+    for (const hv of HIGH_VALUE_RECIPES) {
+      const hasAll = hv.inputs.every(inp => (this.factionInventory.get(inp.id) ?? 0) >= inp.qty);
+      const outputStock = this.factionInventory.get(hv.recipe.replace(/^(create_|forge_|construct_|build_)/, "")) ?? 0;
+      if (hasAll && outputStock < 200) {
+        const maxBatch = Math.min(10, ...hv.inputs.map(inp =>
+          Math.floor((this.factionInventory.get(inp.id) ?? 0) / inp.qty)
+        ));
+        if (maxBatch > 0) {
+          orders.push({
+            type: "craft", targetId: hv.recipe,
+            description: `Craft ${hv.description} (${hv.value}cr/unit, ${maxBatch} possible)`,
+            priority: hv.priority, reason: `high_value: ${hv.value}cr/unit`,
+            quantity: maxBatch,
+            maxConcurrent: crafterSlots,
+          });
+        }
+      }
+    }
+
+    // ── 3. SUPPLY CHAIN CRAFTING (pri 68-72) — ore surplus → refined goods ──
     for (const [oreId, config] of Object.entries(SUPPLY_CHAIN_ORES)) {
       const oreStock = this.factionInventory.get(oreId) ?? 0;
       const outputStock = this.factionInventory.get(config.craftInto) ?? 0;
@@ -696,6 +728,7 @@ export class OrderEngine {
           description: `Craft ${config.craftInto} (${oreStock} ${oreId} → ${config.sellValue}cr/unit)`,
           priority: PRI.CRAFT, reason: `supply_chain: ${config.sellValue}cr/unit`,
           quantity: batchSize,
+          maxConcurrent: crafterSlots,
         });
       }
     }
