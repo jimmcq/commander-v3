@@ -694,16 +694,7 @@ async function* manageFactionSales(
           } catch { /* best effort — may already be deposited */ }
 
           let result: Record<string, unknown>;
-          try {
-            result = await ctx.api.factionCreateSellOrder(item.itemId, listPrice, sellQty);
-          } catch {
-            // Faction orders not supported — fall back to personal sell order
-            try {
-              await withdrawFromFaction(ctx, item.itemId, sellQty);
-              await ctx.refreshState();
-            } catch { /* ok */ }
-            result = await ctx.api.createSellOrder(item.itemId, sellQty, listPrice) as Record<string, unknown>;
-          }
+          result = await ctx.api.factionCreateSellOrder(item.itemId, listPrice, sellQty);
           await ctx.refreshState();
 
           // Track the sell order for future price adjustments
@@ -742,9 +733,7 @@ async function* manageFactionSales(
         } else {
           // Place sell order even at low per-unit price — bulk sells add up
           try {
-            const lowResult = hasFloor
-              ? await ctx.api.createSellOrder(item.itemId, sellQty, listPrice) as Record<string, unknown>
-              : await ctx.api.factionCreateSellOrder(item.itemId, listPrice, sellQty);
+            const lowResult = await ctx.api.factionCreateSellOrder(item.itemId, listPrice, sellQty);
             yield `listed ${sellQty} ${itemName} @ ${listPrice}cr/ea (${listPrice * sellQty}cr total)`;
             listedItems.add(item.itemId);
             ordersCreated++;
@@ -1139,14 +1128,9 @@ async function* manageMaterialBuyOrders(
     const orderCost = target.recommendedPrice * buyQty;
 
     try {
-      // Prefer faction buy orders (funded from faction treasury, better visibility)
+      // Always use faction buy orders (funded from faction treasury)
       let result: Record<string, unknown>;
-      try {
-        result = await ctx.api.factionCreateBuyOrder(target.itemId, target.recommendedPrice, buyQty);
-      } catch {
-        // Faction buy order not supported — fall back to personal buy order
-        result = await ctx.api.createBuyOrder(target.itemId, buyQty, target.recommendedPrice) as Record<string, unknown>;
-      }
+      result = await ctx.api.factionCreateBuyOrder(target.itemId, target.recommendedPrice, buyQty);
       const orderId = String(
         (result as Record<string, unknown>).order_id ??
         (result as Record<string, unknown>).id ??

@@ -904,7 +904,7 @@ export async function* trader(ctx: BotContext): AsyncGenerator<RoutineYield, voi
           if (useOrders) {
             const orderPrice = minSellPrice > 0 ? minSellPrice : undefined;
             if (orderPrice) {
-              await ctx.api.createSellOrder(item, qty, orderPrice);
+              await ctx.api.factionCreateSellOrder(item, orderPrice, qty);
               yield `sell order placed: ${qty}x @ ${orderPrice}cr`;
               try { const stn = getStationName(ctx); await ctx.api.chat("system", `Selling ${qty}x ${item} @ ${orderPrice}cr${stn ? ` at ${stn}` : ""}`); } catch { /* best effort */ }
             } else {
@@ -1816,7 +1816,9 @@ async function* factionSellLoop(
         const pricing = calculateSellPrice(ctx, c.itemId, costBasis, orderStationIds, ctx.player.dockedAtBase!, 0.15);
         if (!pricing || pricing.listPrice * c.quantity < 100) continue; // Skip low-value listings
         try {
-          await ctx.api.createSellOrder(c.itemId, c.quantity, pricing.listPrice);
+          // Deposit to faction first, then create faction sell order
+          try { await ctx.api.factionDepositItems(c.itemId, c.quantity); } catch { /* may already be in storage */ }
+          await ctx.api.factionCreateSellOrder(c.itemId, pricing.listPrice, c.quantity);
           await ctx.refreshState();
           const itemName = ctx.crafting.getItemName(c.itemId) || c.itemId;
           yield `listed ${c.quantity} ${itemName} @ ${pricing.listPrice}cr (sell order fallback)`;
