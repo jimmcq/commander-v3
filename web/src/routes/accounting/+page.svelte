@@ -88,8 +88,8 @@
 	const filteredCredits = $derived(filteredEntries.reduce((s, e) => s + (e.credits != null && e.credits > 0 ? e.credits : 0), 0));
 	const filteredNet = $derived(filteredCredits - filteredDebits);
 
-	// Ending balance = current treasury. Starting = ending - net change in filtered period.
-	const endingBalance = $derived(currentTreasury);
+	// Balance tracks total fleet (bots + treasury), not just treasury
+	const endingBalance = $derived(totalBalance);
 	const startingBalance = $derived(endingBalance - filteredNet);
 
 	const entriesWithBalance = $derived.by(() => {
