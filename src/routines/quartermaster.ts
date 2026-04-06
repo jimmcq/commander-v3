@@ -522,12 +522,26 @@ async function* manageFactionSales(
     .map((f) => f.stationId)
     .filter((id) => id !== homeBase);
 
-  // Check what we already have listed at our station
+  // Check what we already have listed at our station (personal + faction orders)
   const ourSellOrders = localMarket.filter(
-    (o) => o.type === "sell" && o.playerId === ctx.player.id,
+    (o) => o.type === "sell" && (o.playerId === ctx.player.id || o.playerId === ctx.player.factionId),
   );
-  const alreadyListed = new Set(ourSellOrders.map((o) => o.itemId));
-  const currentOrderIds = new Set(ourSellOrders.map((o) => o.id));
+  // Also fetch faction orders directly (more reliable than market scan)
+  let factionSellOrders: MarketOrder[] = [];
+  try {
+    const fOrders = await ctx.api.viewOrders(undefined, "faction");
+    factionSellOrders = fOrders.filter((o: any) => o.type === "sell");
+  } catch { /* ok */ }
+  const allOurOrders = [...ourSellOrders, ...factionSellOrders];
+  // Dedupe by order ID
+  const seenIds = new Set<string>();
+  const dedupedOrders = allOurOrders.filter(o => {
+    if (seenIds.has(o.id)) return false;
+    seenIds.add(o.id);
+    return true;
+  });
+  const alreadyListed = new Set(dedupedOrders.map((o) => o.itemId));
+  const currentOrderIds = new Set(dedupedOrders.map((o) => o.id));
 
   // ── Reconcile tracked sell orders ──
   // Remove filled/cancelled orders (no longer in viewMarket)
