@@ -334,11 +334,14 @@ export async function* quartermaster(ctx: BotContext): AsyncGenerator<RoutineYie
       currentTreasury = fd.credits;
     } catch { /* use 0 */ }
     if (currentTreasury >= 100_000) {
+      // Cap buy budget to 10% of treasury — never spend more than this per cycle
+      const treasuryBudgetPct = 0.10;
       yield* manageMaterialBuyOrders(
         ctx, homeBase, market, trackedMaterialOrders,
-        buyOrderBudgetPct, maxOrderAge, adState, factionStorage, priceIndex,
+        treasuryBudgetPct, maxOrderAge, adState, factionStorage, priceIndex,
+        currentTreasury, // Pass treasury balance for budget calculation
       );
-    } else if (currentTreasury < 100_000) {
+    } else {
       yield `buy orders paused — treasury ${currentTreasury.toLocaleString()}cr < 100,000cr`;
     }
 
@@ -1026,6 +1029,7 @@ async function* manageMaterialBuyOrders(
   adState: AdChatState,
   storageItems: Array<{ itemId: string; quantity: number }>,
   buyPriceIndex: Map<string, PriceEntry>,
+  treasuryBalance?: number,
 ): AsyncGenerator<RoutineYield, void, void> {
   const now = Date.now();
   let actionsThisCycle = 0;
@@ -1166,8 +1170,10 @@ async function* manageMaterialBuyOrders(
   }
 
   // ── Place new orders ──
-  const reserve = 2000;
-  const totalBudget = Math.max(0, (ctx.player.credits - reserve) * budgetPct);
+  // Budget from treasury (faction orders charge treasury, not bot wallet)
+  const treasuryReserve = 50_000; // Always keep 50K in treasury
+  const availableTreasury = treasuryBalance ?? 0;
+  const totalBudget = Math.max(0, (availableTreasury - treasuryReserve) * budgetPct);
   const outstandingValue = [...tracked.values()].reduce(
     (sum, o) => sum + o.priceEach * o.quantity, 0,
   );
