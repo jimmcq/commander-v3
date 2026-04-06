@@ -1489,10 +1489,12 @@ function calculateBuyPrice(
 /**
 /** Items that should never be sold — needed for crafting/facilities */
 const QM_DO_NOT_SELL = new Set([
-  "energy_crystal", "silicon_ore", "circuit_board", "optical_fiber_bundle",
+  "silicon_ore", "circuit_board", "optical_fiber_bundle",
   "repair_kit", "trade_cipher", "trade_crystal",
-  "flex_polymer", "steel_plate",  // Needed for facility builds
-  // fuel_cell handled by CONSUMABLE_RESERVES (500 reserve, sell excess)
+  "flex_polymer",
+  // Items with CONSUMABLE_RESERVES handle their own protection — don't duplicate here:
+  // energy_crystal (1000 reserve), steel_plate (500), copper_wiring (500),
+  // titanium_alloy (200), phase_crystal (1000), quantum_fragments (1000), fuel_cell (500)
 ]);
 
 /**
@@ -2063,10 +2065,12 @@ export function calculateSellPrice(
     listPrice = bestEstimate > 0 ? Math.ceil(bestEstimate * 1.25 * demandBoost) : 0;
   }
 
-  // Floor: never sell below cost basis or 95% of catalog value (competitive but profitable)
-  const catalogFloor = ctx.crafting.getItemBasePrice(itemId) * 0.95;
+  // Floor: never sell below cost basis. Only apply catalog floor when
+  // there's actual buyer demand (otherwise market says it's worth less)
+  const hasRealDemand = actualBuyerPrice > 0;
+  const catalogFloor = hasRealDemand ? ctx.crafting.getItemBasePrice(itemId) * 0.95 : 0;
   const minPrice = Math.max(1, Math.ceil(costBasis * 0.90), Math.ceil(catalogFloor));
-  if (listPrice < minPrice && minPrice > 0) {
+  if (listPrice < minPrice && minPrice > 0 && costBasis > 0) {
     listPrice = minPrice;
   }
 
