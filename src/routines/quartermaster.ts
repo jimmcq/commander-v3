@@ -327,11 +327,20 @@ export async function* quartermaster(ctx: BotContext): AsyncGenerator<RoutineYie
 
     if (ctx.shouldStop) return;
 
-    // ── 4. Manage supply chain buy orders ──
-    yield* manageMaterialBuyOrders(
-      ctx, homeBase, market, trackedMaterialOrders,
-      buyOrderBudgetPct, maxOrderAge, adState, factionStorage, priceIndex,
-    );
+    // ── 4. Manage supply chain buy orders (only when treasury is healthy) ──
+    let currentTreasury = 0;
+    try {
+      const fd = await ctx.api.viewFactionStorageFull();
+      currentTreasury = fd.credits;
+    } catch { /* use 0 */ }
+    if (currentTreasury >= 100_000) {
+      yield* manageMaterialBuyOrders(
+        ctx, homeBase, market, trackedMaterialOrders,
+        buyOrderBudgetPct, maxOrderAge, adState, factionStorage, priceIndex,
+      );
+    } else if (currentTreasury < 100_000) {
+      yield `buy orders paused — treasury ${currentTreasury.toLocaleString()}cr < 100,000cr`;
+    }
 
     if (ctx.shouldStop) return;
 
