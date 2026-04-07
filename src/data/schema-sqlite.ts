@@ -149,6 +149,18 @@ export const creditHistory = sqliteTable("credit_history", {
   index("idx_credit_ts").on(table.timestamp),
 ]);
 
+// ── Per-Bot Credit Snapshots ──
+
+export const botCreditSnapshots = sqliteTable("bot_credit_snapshots", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  tenantId: text("tenant_id").notNull(),
+  timestamp: integer("timestamp").notNull(),
+  botId: text("bot_id").notNull(),
+  username: text("username").notNull(),
+  credits: integer("credits").notNull(),
+  routine: text("routine"),
+});
+
 // ── Goals (persisted across restarts) ──
 
 export const goals = sqliteTable("goals", {

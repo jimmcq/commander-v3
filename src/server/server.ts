@@ -9,7 +9,7 @@ import type { ServerMessage, ClientMessage } from "../types/protocol";
 import type { DB } from "../data/db";
 import type { TrainingLogger } from "../data/training-logger";
 import { gt, desc, sql, eq, and } from "drizzle-orm";
-import { creditHistory, marketHistory, activityLog, commanderLog as commanderLogTable, factionTransactions, financialEvents, users } from "../data/schema";
+import { creditHistory, marketHistory, activityLog, commanderLog as commanderLogTable, factionTransactions, financialEvents, users, botCreditSnapshots } from "../data/schema";
 import { verifyToken, extractToken, createToken, hashPassword, verifyPassword, type TokenPayload } from "../auth/jwt";
 
 const RANGE_MS: Record<string, number> = {
@@ -273,6 +273,14 @@ async function handleApiRoute(url: URL, opts: ServerOptions): Promise<Response> 
 
   if (path === "economy/mining-rate" && opts.db) {
     return handleMiningRateRoute(url, opts.db);
+  }
+
+  if (path === "economy/credit-snapshots" && opts.db) {
+    return handleCreditSnapshotsRoute(url, opts.db);
+  }
+
+  if (path === "economy/bot-credits" && opts.db) {
+    return handleBotCreditsRoute(url, opts.db);
   }
 
   return Response.json({ error: "Not found" }, { status: 404 });
@@ -868,4 +876,48 @@ async function handlePublicStats(opts: ServerOptions): Promise<Response> {
       "Access-Control-Allow-Origin": "*",
     },
   });
+}
+
+/** GET /api/economy/credit-snapshots?range=1h|1d|1w — fleet + faction credit history */
+async function handleCreditSnapshotsRoute(url: URL, db: DB): Promise<Response> {
+  const range = url.searchParams.get("range") ?? "1d";
+  const ms = RANGE_MS[range] ?? RANGE_MS["1d"];
+  const since = Date.now() - ms;
+
+  const rows = await (db as any).select().from(creditHistory)
+    .where(gt(creditHistory.timestamp, since))
+    .orderBy(creditHistory.timestamp);
+
+  return Response.json(rows.map((r: any) => ({
+    timestamp: r.timestamp,
+    botCredits: r.totalCredits,
+    factionCredits: r.factionCredits ?? 0,
+    total: r.totalCredits + (r.factionCredits ?? 0),
+    activeBots: r.activeBots,
+  })));
+}
+
+/** GET /api/economy/bot-credits?range=1h|1d|1w&bot=id — per-bot credit history */
+async function handleBotCreditsRoute(url: URL, db: DB): Promise<Response> {
+  const range = url.searchParams.get("range") ?? "1d";
+  const botFilter = url.searchParams.get("bot") ?? "";
+  const ms = RANGE_MS[range] ?? RANGE_MS["1d"];
+  const since = Date.now() - ms;
+
+  let whereClause = gt(botCreditSnapshots.timestamp, since);
+  if (botFilter) {
+    whereClause = and(whereClause, eq(botCreditSnapshots.botId, botFilter))!;
+  }
+
+  const rows = await (db as any).select().from(botCreditSnapshots)
+    .where(whereClause)
+    .orderBy(botCreditSnapshots.timestamp);
+
+  return Response.json(rows.map((r: any) => ({
+    timestamp: r.timestamp,
+    botId: r.botId,
+    username: r.username,
+    credits: r.credits,
+    routine: r.routine,
+  })));
 }

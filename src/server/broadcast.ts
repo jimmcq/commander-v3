@@ -11,7 +11,7 @@ import type { Galaxy } from "../core/galaxy";
 import type { DB } from "../data/db";
 import type { SocialChatMessage, SocialForumThread, SocialDM, FactionState, FactionMember, FactionFacility, OpenOrder, BrainDecisionStats } from "../types/protocol";
 import type { MarketOrder } from "../types/game";
-import { creditHistory, activityLog } from "../data/schema";
+import { creditHistory, activityLog, botCreditSnapshots } from "../data/schema";
 import { lt } from "drizzle-orm";
 import type { TrainingLogger } from "../data/training-logger";
 // ChatIntelligence removed — LLM deferred to social features later
@@ -232,14 +232,29 @@ export function startBroadcastLoop(deps: BroadcastDeps): () => void {
 
     // Credit history to DB (every 30s) — includes bot + faction credits
     if (tick % cfg.creditHistoryIntervalTicks === 0) {
+      const now = Date.now();
       await (deps.db as any).insert(creditHistory)
         .values({
           tenantId: deps.tenantId,
-          timestamp: Date.now(),
+          timestamp: now,
           totalCredits: fleet.totalCredits,
           factionCredits: cachedFactionCredits ?? 0,
           activeBots: fleet.activeBots,
         });
+      // Per-bot credit snapshots (every 60s = every 2nd credit tick)
+      if (tick % (cfg.creditHistoryIntervalTicks * 2) === 0 && fleet.bots.length > 0) {
+        const botRows = fleet.bots.map((b: any) => ({
+          tenantId: deps.tenantId,
+          timestamp: now,
+          botId: b.botId,
+          username: b.username ?? b.botId,
+          credits: b.credits,
+          routine: b.routine ?? null,
+        }));
+        try {
+          await (deps.db as any).insert(botCreditSnapshots).values(botRows);
+        } catch { /* non-critical */ }
+      }
     }
 
     // ── Maintenance Tasks ──

@@ -204,6 +204,22 @@ export const creditHistory = pgTable("credit_history", {
   index("idx_credit_ts").on(table.timestamp),
 ]);
 
+// ── Per-Bot Credit Snapshots ──
+
+export const botCreditSnapshots = pgTable("bot_credit_snapshots", {
+  id: serial("id").primaryKey(),
+  tenantId: text("tenant_id").notNull(),
+  timestamp: bigint("timestamp", { mode: "number" }).notNull(),
+  botId: text("bot_id").notNull(),
+  username: text("username").notNull(),
+  credits: integer("credits").notNull(),
+  routine: text("routine"),
+}, (table) => [
+  index("idx_bot_credits_tenant").on(table.tenantId),
+  index("idx_bot_credits_ts").on(table.timestamp),
+  index("idx_bot_credits_bot").on(table.botId),
+]);
+
 // ── Goals (persisted across restarts) ──
 
 export const goals = pgTable("goals", {
