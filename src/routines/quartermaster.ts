@@ -266,22 +266,19 @@ export async function* quartermaster(ctx: BotContext): AsyncGenerator<RoutineYie
       }
     }
 
-    // Scan local market
-    // ── Fund treasury if low — QM needs credits for listing fees ──
-    try {
-      const factionData = await ctx.api.viewFactionStorageFull();
-      const treasuryBalance = factionData.credits;
-      if (treasuryBalance < 10_000 && ctx.player.credits > 20_000) {
-        const deposit = Math.min(ctx.player.credits - 10_000, 50_000);
-        if (deposit > 0) {
+    // ── Fund treasury if low (use cached balance, no extra API call) ──
+    const cachedTreasury = ctx.cache.getFactionCredits();
+    if (cachedTreasury < 10_000 && ctx.player.credits > 20_000) {
+      const deposit = Math.min(ctx.player.credits - 10_000, 50_000);
+      if (deposit > 0) {
+        try {
           await ctx.api.factionDepositCredits(deposit);
-          // Exclude from revenue tracking (internal transfer)
           await ctx.refreshState();
-          yield `funded treasury: ${deposit}cr (was ${treasuryBalance}cr)`;
-          ctx.logger.logLedger?.({ type: "credit_deposit", botId: ctx.botId, credits: -deposit, details: `QM funded treasury (was ${treasuryBalance}cr)` }).catch(() => {});
-        }
+          yield `funded treasury: ${deposit}cr (was ${cachedTreasury}cr)`;
+          ctx.logger.logLedger?.({ type: "credit_deposit", botId: ctx.botId, credits: -deposit, details: `QM funded treasury (was ${cachedTreasury}cr)` }).catch(() => {});
+        } catch { /* best effort */ }
       }
-    } catch { /* best effort */ }
+    }
 
     let market: MarketOrder[] = [];
     try {
@@ -328,11 +325,8 @@ export async function* quartermaster(ctx: BotContext): AsyncGenerator<RoutineYie
     if (ctx.shouldStop) return;
 
     // ── 4. Manage supply chain buy orders (only when treasury is healthy) ──
-    let currentTreasury = 0;
-    try {
-      const fd = await ctx.api.viewFactionStorageFull();
-      currentTreasury = fd.credits;
-    } catch { /* use 0 */ }
+    // Use cached treasury balance — no extra API call
+    const currentTreasury = ctx.cache.getFactionCredits();
     if (currentTreasury >= 100_000) {
       // Cap buy budget to 10% of treasury — never spend more than this per cycle
       const treasuryBudgetPct = 0.10;
