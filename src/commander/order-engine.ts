@@ -802,12 +802,42 @@ export class OrderEngine {
       });
     }
 
-    // Also sell items with no stock target that are piling up
+    // ── TARGETED TRADE ROUTES — sell high-value items at stations with confirmed demand ──
+    const TRADE_ROUTES: Array<{ item: string; minStock: number; sellAt: string; priority: number; description: string }> = [
+      // Power cells: Deep Range Outpost buys at 600-1200cr
+      { item: "power_cell", minStock: 5, sellAt: "deep_range_outpost", priority: PRI.TRADE + 10, description: "Sell power cells at Deep Range (600-1200cr)" },
+      // Titanium alloy: multiple stations buy at 94-232cr
+      { item: "titanium_alloy", minStock: 10, sellAt: "grand_exchange_station", priority: PRI.TRADE + 5, description: "Sell titanium alloy at Grand Exchange (148cr)" },
+      // Circuit boards: Nova Terra buys at 191-200cr
+      { item: "circuit_board", minStock: 50, sellAt: "nova_terra_central", priority: PRI.TRADE + 5, description: "Sell circuit boards at Nova Terra (191cr)" },
+      // Fuel cells: Gold Run buys at 71-74cr
+      { item: "fuel_cell", minStock: 100, sellAt: "gold_run_extraction_hub", priority: PRI.TRADE + 3, description: "Sell fuel cells at Gold Run (71cr)" },
+      // Reinforced bulkheads: Deep Range buys at 1600-1965cr
+      { item: "reinforced_bulkhead", minStock: 1, sellAt: "deep_range_outpost", priority: PRI.TRADE + 8, description: "Sell reinforced bulkheads at Deep Range (1600cr)" },
+      // Steel plate: Central Nexus — Marlowe buys at 10cr
+      { item: "steel_plate", minStock: 50, sellAt: "central_nexus", priority: PRI.TRADE, description: "Sell steel plate at Central Nexus (10cr)" },
+    ];
+
+    for (const route of TRADE_ROUTES) {
+      const stock = this.factionInventory.get(route.item) ?? 0;
+      if (stock < route.minStock) continue;
+      orders.push({
+        type: "trade", targetId: route.item,
+        description: route.description,
+        priority: route.priority, reason: `trade_route: ${route.sellAt}`,
+        quantity: Math.min(stock, 50),
+        stationId: route.sellAt,
+        fromStationId: this.config.factionStorageStation ?? this.config.homeBase,
+      });
+    }
+
+    // Also sell items with no stock target that are piling up (at home station only)
     for (const [itemId, qty] of this.factionInventory) {
-      if (qty < 100) continue; // Not worth selling small amounts
-      if (DO_NOT_SELL.has(itemId)) continue; // Protected items — needed for crafting/facilities
-      if (this.stockTargets.some(t => t.item_id === itemId)) continue; // Has target, handled above
-      if (itemId.endsWith("_ore")) continue; // Keep ores for crafting
+      if (qty < 100) continue;
+      if (DO_NOT_SELL.has(itemId)) continue;
+      if (this.stockTargets.some(t => t.item_id === itemId)) continue;
+      if (itemId.endsWith("_ore")) continue;
+      if (TRADE_ROUTES.some(r => r.item === itemId)) continue; // Handled by trade routes
 
       orders.push({
         type: "sell", targetId: itemId,
