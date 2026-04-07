@@ -735,13 +735,9 @@ async function* manageFactionSales(
 
       const sellQty = Math.min(inCargo, listQty);
 
-      // Try direct sell first — but skip for modules with a price floor
-      // (don't dump crafted modules at whatever the station offers)
-      const hasFloor = MODULE_MIN_PRICES[item.itemId] != null;
-      const directResult = hasFloor
-        ? { quantity: 0, total: 0, priceEach: 0 }
-        : await ctx.api.sell(item.itemId, sellQty, { autoList: true });
-      if (!hasFloor) await ctx.refreshState();
+      // Always try NPC direct sell first — instant revenue, no listing fee
+      const directResult = await ctx.api.sell(item.itemId, sellQty);
+      await ctx.refreshState();
 
       if (directResult.total > 0) {
         yield `sold ${directResult.quantity} ${itemName} @ ${directResult.priceEach}cr (${directResult.total}cr) — direct sell`;
@@ -764,14 +760,10 @@ async function* manageFactionSales(
           } catch { /* best effort */ }
         }
       } else {
-        // No NPC buyer at this station — create a sell order as fallback
-        // Check if ANY station has buy orders for this item (someone wants it)
+        // No NPC buyer — only create sell order for high-value items (>100cr) with confirmed demand
+        // Low-value items just re-deposit (listing fee isn't worth it)
         const hasBuyOrders = priceIndex.get(item.itemId)?.hasBuyVolume ?? false;
-
-        // Items to dump at any price (list once to clear stock, never craft more)
-        const DUMP_ITEMS = new Set(["crimson_bloodwine"]);
-        // List if: buy orders exist anywhere (demand confirmed), per-unit price is reasonable, or dump item
-        const worthListing = hasBuyOrders || listPrice >= 10 || DUMP_ITEMS.has(item.itemId);
+        const worthListing = hasBuyOrders && listPrice >= 100;
         if (worthListing) {
           // Re-deposit to faction storage first, then create faction sell order
           try {
