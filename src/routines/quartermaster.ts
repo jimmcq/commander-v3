@@ -1604,8 +1604,9 @@ async function* manageFactionFacilities(
   // Priority order: quarters → intel terminal → trade ledger → vault (storage L2) → user queue
   const userQueue = ctx.fleetConfig.facilityBuildQueue ?? [];
   const CORE_FACILITIES = ["faction_quarters", "intel_terminal", "trade_ledger"];
-  // Build queue: Workshop (craft→faction), Market Runner (auto-trade), Intel Center (L2 intel)
-  const BUILD_QUEUE = ["faction_workshop", "market_runner", "intel_center"];
+  // Build queue: Workshop built. Market Runner + Intel Center paused until treasury recovers.
+  const BUILD_QUEUE: string[] = [];
+  // TODO: add "market_runner", "intel_center" once treasury > 1M and IDs confirmed
   const ESSENTIAL_FACILITIES = [
     ...CORE_FACILITIES,
     ...BUILD_QUEUE,
