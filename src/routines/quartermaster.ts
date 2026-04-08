@@ -1604,9 +1604,12 @@ async function* manageFactionFacilities(
   // Priority order: quarters → intel terminal → trade ledger → vault (storage L2) → user queue
   const userQueue = ctx.fleetConfig.facilityBuildQueue ?? [];
   const CORE_FACILITIES = ["faction_quarters", "intel_terminal", "trade_ledger"];
+  // Build queue: Workshop (craft→faction), Market Runner (auto-trade), Intel Center (L2 intel)
+  const BUILD_QUEUE = ["faction_workshop", "market_runner", "intel_center"];
   const ESSENTIAL_FACILITIES = [
     ...CORE_FACILITIES,
-    ...userQueue.filter(f => !CORE_FACILITIES.includes(f)),
+    ...BUILD_QUEUE,
+    ...userQueue.filter(f => !CORE_FACILITIES.includes(f) && !BUILD_QUEUE.includes(f)),
   ];
 
   // Check faction treasury (direct API call, not cached — upgrades need current balance)
