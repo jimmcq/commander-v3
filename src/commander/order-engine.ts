@@ -666,7 +666,27 @@ export class OrderEngine {
       });
     }
 
-    // ── 1b. FUEL CELL CRAFTING — high priority until reserve met, then sell excess ──
+    // ── 1b. CIRCUIT BOARD SUPPLY — needed for power cells (2 per batch) ──
+    // Keep 100+ circuit boards in stock for power cell production
+    const circuitBoardStock = this.factionInventory.get("circuit_board") ?? 0;
+    const copperOre = this.factionInventory.get("copper_ore") ?? 0;
+    if (circuitBoardStock < 100 && copperOre >= 3 && silicon >= 2 && energyCrystal >= 1) {
+      const canCraftCB = Math.min(
+        Math.floor(copperOre / 3), Math.floor(silicon / 2), Math.floor(energyCrystal / 1), 10
+      );
+      if (canCraftCB > 0) {
+        orders.push({
+          type: "craft", targetId: "fabricate_circuit_boards",
+          description: `Supply chain: circuit boards for power cells (${circuitBoardStock} in stock, need 100+)`,
+          priority: PRI.FACILITY + 2, // Above power cells (86) so supply stays ahead
+          reason: "supply_chain: circuit boards → power cells",
+          quantity: canCraftCB,
+          maxConcurrent: Math.min(crafterSlots, 2), // Don't use all crafters on CBs
+        });
+      }
+    }
+
+    // ── 1c. FUEL CELL CRAFTING — high priority until reserve met, then sell excess ──
     const FUEL_CELL_RESERVE = 500;
     const fuelCells = this.factionInventory.get("fuel_cell") ?? 0;
     const steelPlates = this.factionInventory.get("steel_plate") ?? 0;

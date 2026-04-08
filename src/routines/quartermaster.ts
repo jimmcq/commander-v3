@@ -266,20 +266,6 @@ export async function* quartermaster(ctx: BotContext): AsyncGenerator<RoutineYie
       }
     }
 
-    // ── Fund treasury if low (use cached balance, no extra API call) ──
-    const cachedTreasury = ctx.cache.getFactionCredits();
-    if (cachedTreasury < 10_000 && ctx.player.credits > 20_000) {
-      const deposit = Math.min(ctx.player.credits - 10_000, 50_000);
-      if (deposit > 0) {
-        try {
-          await ctx.api.factionDepositCredits(deposit);
-          await ctx.refreshState();
-          yield `funded treasury: ${deposit}cr (was ${cachedTreasury}cr)`;
-          ctx.logger.logLedger?.({ type: "credit_deposit", botId: ctx.botId, credits: -deposit, details: `QM funded treasury (was ${cachedTreasury}cr)` }).catch(() => {});
-        } catch { /* best effort */ }
-      }
-    }
-
     let market: MarketOrder[] = [];
     try {
       market = await ctx.api.viewMarket();
@@ -292,13 +278,29 @@ export async function* quartermaster(ctx: BotContext): AsyncGenerator<RoutineYie
 
     if (ctx.shouldStop) return;
 
-    // ── Single faction storage fetch per cycle (was 4x!) ──
+    // ── Single faction storage fetch per cycle — also gets live treasury balance ──
     let factionStorage: Array<{ itemId: string; quantity: number }> = [];
+    let liveTreasury = 0;
     try {
-      const { items: raw } = await fleetViewFactionStorage(ctx);
-      factionStorage = raw.filter((s) => s.quantity > 0);
+      const storageData = await fleetViewFactionStorage(ctx);
+      factionStorage = storageData.items.filter((s) => s.quantity > 0);
+      liveTreasury = storageData.credits ?? 0;
     } catch (err) {
       yield `faction storage check failed: ${err instanceof Error ? err.message : String(err)}`;
+    }
+
+    // ── Fund treasury if low ──
+    if (liveTreasury < 10_000 && ctx.player.credits > 20_000) {
+      const deposit = Math.min(ctx.player.credits - 10_000, 50_000);
+      if (deposit > 0) {
+        try {
+          await ctx.api.factionDepositCredits(deposit);
+          await ctx.refreshState();
+          liveTreasury += deposit;
+          yield `funded treasury: ${deposit}cr (was ${liveTreasury - deposit}cr)`;
+          ctx.logger.logLedger?.({ type: "credit_deposit", botId: ctx.botId, credits: -deposit, details: `QM funded treasury` }).catch(() => {});
+        } catch { /* best effort */ }
+      }
     }
 
     // Build price index ONCE per cycle (was 2x: sales + buy orders)
@@ -325,8 +327,7 @@ export async function* quartermaster(ctx: BotContext): AsyncGenerator<RoutineYie
     if (ctx.shouldStop) return;
 
     // ── 4. Manage supply chain buy orders (only when treasury is healthy) ──
-    // Use cached treasury balance — no extra API call
-    const currentTreasury = ctx.cache.getFactionCredits();
+    const currentTreasury = liveTreasury;
     if (currentTreasury >= 100_000) {
       // Cap buy budget to 10% of treasury — never spend more than this per cycle
       const treasuryBudgetPct = 0.10;
@@ -360,7 +361,7 @@ export async function* quartermaster(ctx: BotContext): AsyncGenerator<RoutineYie
     if (maxCr.message) yield maxCr.message;
 
     // Quick cycle — QM is revenue-critical, must react to market changes fast
-    await interruptibleSleep(ctx, 15_000);
+    await interruptibleSleep(ctx, 60_000); // 60s between cycles (was 15s — too aggressive)
     yield typedYield("cycle_complete", { type: "cycle_complete", botId: ctx.botId, routine: "quartermaster" });
   }
 }
