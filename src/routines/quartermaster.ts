@@ -905,7 +905,8 @@ async function* buyEquipmentModules(
     return {
       ...t,
       target: Math.min(t.target, targetCount), // Respect param override
-      count: inStorage + equippedOnBots + listedForSale,
+      count: inStorage + equippedOnBots, // Only count what fleet actually has (not listed for sale)
+      listedForSale,
       inStorage,
       equippedOnBots,
     };
@@ -913,8 +914,7 @@ async function* buyEquipmentModules(
 
   // Report inventory
   const inv = targets.map((t) => {
-    const listed = t.count - t.inStorage - t.equippedOnBots;
-    return `${t.label}: ${t.count}/${t.target} (${t.inStorage} stored, ${t.equippedOnBots} equipped${listed > 0 ? `, ${listed} listed` : ""})`;
+    return `${t.label}: ${t.count}/${t.target} (${t.inStorage} stored, ${t.equippedOnBots} equipped${t.listedForSale > 0 ? `, ${t.listedForSale} listed` : ""})`;
   }).join(", ");
   yield `modules: ${inv}`;
 
