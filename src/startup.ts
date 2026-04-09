@@ -422,23 +422,19 @@ export async function startup(config: AppConfig): Promise<AppServices> {
     }
   }
 
-  // ── Faction Discovery (async, non-blocking, retries every 60s) ──
-  let discoveryTimer: ReturnType<typeof setInterval> | null = null;
+  // ── Faction Discovery (runs once, retries only if first attempt fails) ──
   const runDiscovery = async () => {
-    if (botManager.fleetConfig.homeBase && botManager.fleetConfig.factionStorageStation) return; // Already found
+    if (botManager.fleetConfig.homeBase && botManager.fleetConfig.factionStorageStation) return;
     const result = await discoverFactionStorage(botManager, galaxy, db, tenantId);
     if (result) {
       propagateFleetHome(botManager, result.stationId, result.systemId);
-      if (discoveryTimer) {
-        clearInterval(discoveryTimer);
-        discoveryTimer = null;
-      }
-      // Force commander re-eval now that home config is populated
       commander.forceEvaluation();
+    } else {
+      // Cache miss + no bots logged in yet — retry once after galaxy loads
+      setTimeout(runDiscovery, 90_000);
     }
   };
-  runDiscovery(); // Initial attempt (will likely fail before bots login)
-  discoveryTimer = setInterval(runDiscovery, 60_000); // Retry every 60s until found
+  runDiscovery();
 
   // ── Fleet-wide order cleanup (runs once 90s after startup) ──
   // Cancels orphaned sell orders for raw ores/crystals/facility materials across ALL bots
@@ -613,7 +609,7 @@ export async function startup(config: AppConfig): Promise<AppServices> {
     close: async () => {
       commander.stop();
       stopBroadcast();
-      if (discoveryTimer) { clearInterval(discoveryTimer); discoveryTimer = null; }
+      // discoveryTimer removed — discovery uses one-shot setTimeout now
       if (logFlushTimer) clearInterval(logFlushTimer);
       await flushLogs(); // Flush remaining logs before close
       await connection.close(); // Close PG pool or SQLite file
