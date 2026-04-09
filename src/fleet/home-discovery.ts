@@ -31,6 +31,11 @@ export async function discoverFactionStorage(
   // Method 1: Persistent cache
   const cached = await tryPersistentCache(db, tenantId);
   if (cached) {
+    // If galaxy hasn't loaded yet, trust the cache — don't nuke it
+    if (galaxy.systemCount === 0) {
+      console.log(`[Discovery] Method 1: Galaxy not loaded yet — trusting cache (${cached.stationId})`);
+      return cached;
+    }
     const systemId = galaxy.getSystemForBase(cached.stationId);
     if (systemId) {
       console.log(`[Discovery] Method 1: Restored from cache — ${cached.stationId} in ${cached.systemId}`);
