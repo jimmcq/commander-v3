@@ -465,6 +465,13 @@ export async function* miner(ctx: BotContext): AsyncGenerator<RoutineYield, void
         if (isProtectedItem(item.itemId)) continue;
         try {
           if (mode === "faction_deposit") {
+            // Only deposit to faction at faction storage station
+            const fStnMiner = ctx.fleetConfig.factionStorageStation;
+            if (fStnMiner && ctx.player.dockedAtBase !== fStnMiner) {
+              yield `not at faction station — skipping deposit`;
+              depositFailed = true;
+              break;
+            }
             await ctx.api.factionDepositItems(item.itemId, item.quantity);
             ctx.cache.invalidateFactionStorage();
           } else {

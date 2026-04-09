@@ -1837,6 +1837,8 @@ async function* factionSellLoop(
         if (aRaw !== bRaw) return aRaw - bRaw;
         return ctx.crafting.getEffectiveSellPrice(b.itemId) - ctx.crafting.getEffectiveSellPrice(a.itemId);
       });
+    // Track items that failed due to station facility issues (not item issues)
+    const stationFailedItems = new Set<string>();
     if (unsoldForOrders.length > 0 && ctx.player.dockedAtBase) {
       const orderStationIds = cachedStations.filter((id) => id !== ctx.player.dockedAtBase);
       for (const c of unsoldForOrders) {
@@ -1857,7 +1859,10 @@ async function* factionSellLoop(
           const errMsg = err instanceof Error ? err.message : String(err);
           yield `sell order failed: ${errMsg}`;
           // Station facility issue — don't blacklist the item, it's sellable elsewhere
-          if (errMsg.includes("no_faction_market") || errMsg.includes("no_faction_storage")) continue;
+          if (errMsg.includes("no_faction_market") || errMsg.includes("no_faction_storage")) {
+            stationFailedItems.add(c.itemId);
+            continue;
+          }
         }
       }
     }
@@ -1865,8 +1870,9 @@ async function* factionSellLoop(
     // Re-deposit anything still in cargo after sell orders
     const unsoldCargo = ctx.ship.cargo.filter((c) => !isOre(c.itemId) && !isProtectedItem(c.itemId) && c.quantity > 0);
     if (unsoldCargo.length > 0) {
-      // Blacklist unsold items so we don't loop on them
+      // Blacklist unsold items so we don't loop on them (skip station facility failures)
       for (const c of unsoldCargo) {
+        if (stationFailedItems.has(c.itemId)) continue;
         if (withdrawnItems.some((w) => w.itemId === c.itemId)) {
           blacklistedItems.add(c.itemId);
           ctx.cache.markUnsellable(c.itemId);
