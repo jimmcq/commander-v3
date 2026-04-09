@@ -323,8 +323,10 @@ export async function dockAtCurrent(ctx: BotContext): Promise<void> {
     } catch { /* no trade ledger facility — ignore */ }
 
     // Auto-deposit excess credits to faction treasury (maxBotCredits enforcement)
+    // Only at faction storage station
     const maxCredits = ctx.fleetConfig.maxBotCredits ?? 100_000;
-    if (maxCredits > 0 && ctx.player.credits > maxCredits) {
+    const fStnSvc = ctx.fleetConfig.factionStorageStation;
+    if (maxCredits > 0 && ctx.player.credits > maxCredits && (!fStnSvc || ctx.player.dockedAtBase === fStnSvc)) {
       const excess = ctx.player.credits - maxCredits;
       try {
         await ctx.api.factionDepositCredits(excess);
@@ -569,6 +571,8 @@ export async function serviceShip(ctx: BotContext): Promise<void> {
  */
 export async function ensureInsurance(ctx: BotContext): Promise<void> {
   if (!ctx.player.dockedAtBase) return;
+  // Starter ships are free to replace — skip insurance
+  if (ctx.ship.classId.startsWith("starter")) return;
 
   try {
     const quote = await ctx.api.getInsuranceQuote();
@@ -868,6 +872,12 @@ export async function depositItem(ctx: BotContext, itemId: string): Promise<void
     || ctx.fleetConfig.defaultStorageMode === "faction_deposit";
 
   if (useFaction) {
+    // Only deposit to faction storage at a station that has it
+    const factionStation = ctx.fleetConfig.factionStorageStation;
+    if (factionStation && ctx.player.dockedAtBase !== factionStation) {
+      log(ctx, `skipping faction deposit (not at faction storage station)`);
+      return;
+    }
     await ctx.api.factionDepositItems(itemId, qty);
     ctx.cache.invalidateFactionStorage();
     ctx.eventBus.emit({
@@ -924,19 +934,22 @@ export async function disposeCargo(ctx: BotContext): Promise<SellResult> {
         || item.itemId.includes("hydrogen") || item.itemId.includes("argon");
 
       if (isRaw && mode === "faction_deposit") {
-        try {
-          await ctx.api.factionDepositItems(item.itemId, qty);
-          ctx.cache.invalidateFactionStorage();
-          ctx.eventBus.emit({
-            type: "deposit", botId: ctx.botId, itemId: item.itemId, quantity: qty,
-            target: "faction", stationId: ctx.player.dockedAtBase ?? "",
-          });
-          log(ctx, `deposited ${qty}x ${item.itemId} to faction storage`);
-          items.push({ itemId: item.itemId, quantity: qty, priceEach: 0, total: 0 });
-          continue;
-        } catch (err) {
-          logWarn(ctx, `faction deposit failed for ${item.itemId}: ${err instanceof Error ? err.message : err}`);
-          // Fall through to sell
+        const fStation = ctx.fleetConfig.factionStorageStation;
+        if (!fStation || ctx.player.dockedAtBase === fStation) {
+          try {
+            await ctx.api.factionDepositItems(item.itemId, qty);
+            ctx.cache.invalidateFactionStorage();
+            ctx.eventBus.emit({
+              type: "deposit", botId: ctx.botId, itemId: item.itemId, quantity: qty,
+              target: "faction", stationId: ctx.player.dockedAtBase ?? "",
+            });
+            log(ctx, `deposited ${qty}x ${item.itemId} to faction storage`);
+            items.push({ itemId: item.itemId, quantity: qty, priceEach: 0, total: 0 });
+            continue;
+          } catch (err) {
+            logWarn(ctx, `faction deposit failed for ${item.itemId}: ${err instanceof Error ? err.message : err}`);
+            // Fall through to sell
+          }
         }
       }
 
@@ -952,9 +965,10 @@ export async function disposeCargo(ctx: BotContext): Promise<SellResult> {
         }
       } catch { /* no buyer — fall through to deposit */ }
 
-      // No buyer — deposit to faction storage as fallback
+      // No buyer — deposit to faction storage as fallback (only at faction station)
       try {
-        if (mode === "faction_deposit") {
+        const fStn = ctx.fleetConfig.factionStorageStation;
+        if (mode === "faction_deposit" && (!fStn || ctx.player.dockedAtBase === fStn)) {
           await ctx.api.factionDepositItems(item.itemId, qty);
           ctx.cache.invalidateFactionStorage();
           ctx.eventBus.emit({
@@ -1721,6 +1735,11 @@ export async function payFactionTax(ctx: BotContext, earned: number): Promise<{ 
   if (pct <= 0 || earned <= 0 || !ctx.player.dockedAtBase) {
     return { deposited: 0, message: "" };
   }
+  // Only deposit tax at faction storage station
+  const factionStn = ctx.fleetConfig.factionStorageStation;
+  if (factionStn && ctx.player.dockedAtBase !== factionStn) {
+    return { deposited: 0, message: "" };
+  }
 
   const taxAmount = Math.floor(earned * pct / 100);
   if (taxAmount <= 0) return { deposited: 0, message: "" };
@@ -1748,6 +1767,11 @@ export async function ensureMinCredits(ctx: BotContext): Promise<{ withdrawn: nu
   if (minCredits <= 0 || !ctx.player.dockedAtBase) {
     return { withdrawn: 0, message: "" };
   }
+  // Only withdraw from faction treasury at faction storage station
+  const fStn = ctx.fleetConfig.factionStorageStation;
+  if (fStn && ctx.player.dockedAtBase !== fStn) {
+    return { withdrawn: 0, message: "" };
+  }
 
   const deficit = minCredits - ctx.player.credits;
   if (deficit <= 0) return { withdrawn: 0, message: "" };
@@ -1772,6 +1796,11 @@ export async function ensureMinCredits(ctx: BotContext): Promise<{ withdrawn: nu
 export async function depositExcessCredits(ctx: BotContext): Promise<{ deposited: number; message: string }> {
   const maxCredits = ctx.fleetConfig.maxBotCredits;
   if (maxCredits <= 0 || !ctx.player.dockedAtBase) {
+    return { deposited: 0, message: "" };
+  }
+  // Only deposit excess credits at faction storage station
+  const fStn = ctx.fleetConfig.factionStorageStation;
+  if (fStn && ctx.player.dockedAtBase !== fStn) {
     return { deposited: 0, message: "" };
   }
 

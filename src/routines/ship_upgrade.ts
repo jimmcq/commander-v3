@@ -164,15 +164,17 @@ export async function* ship_upgrade(ctx: BotContext): AsyncGenerator<RoutineYiel
     await refuelIfNeeded(ctx);
     await repairIfNeeded(ctx);
 
-    // Auto-insure after switch
-    try {
-      const quote = await ctx.api.getInsuranceQuote();
-      const premium = Number(quote?.premium ?? quote?.cost ?? 0);
-      if (premium > 0 && ctx.player.credits > premium * 7) {
-        await ctx.api.buyInsurance(360);
-        yield `insured ship (${premium}cr)`;
-      }
-    } catch { /* optional */ }
+    // Auto-insure after switch (starter ships are free to replace)
+    if (!ctx.ship.classId.startsWith("starter")) {
+      try {
+        const quote = await ctx.api.getInsuranceQuote();
+        const premium = Number(quote?.premium ?? quote?.cost ?? 0);
+        if (premium > 0 && ctx.player.credits > premium * 7) {
+          await ctx.api.buyInsurance(360);
+          yield `insured ship (${premium}cr)`;
+        }
+      } catch { /* optional */ }
+    }
 
     console.log(`[${ctx.botId}] Ship switch (owned): ${oldShipClass} → ${targetShipClass} (FREE)`);
     yield `switch complete: ${oldShipClass} → ${targetShipClass}`;
@@ -317,16 +319,18 @@ export async function* ship_upgrade(ctx: BotContext): AsyncGenerator<RoutineYiel
   await refuelIfNeeded(ctx);
   await repairIfNeeded(ctx);
 
-  // Step 11: Auto-insure the new ship (protect investment)
-  try {
-    const quote = await ctx.api.getInsuranceQuote();
-    const premium = Number(quote?.premium ?? quote?.cost ?? 0);
-    const walletPct = ctx.player.credits > 0 ? premium / ctx.player.credits : 1;
-    if (premium > 0 && walletPct <= 0.15) { // Max 15% of wallet on insurance
-      await ctx.api.buyInsurance(360); // ~1 hour coverage
-      yield `insured new ship (${premium}cr premium)`;
-    }
-  } catch { /* insurance optional — don't fail upgrade */ }
+  // Step 11: Auto-insure the new ship (starter ships are free to replace)
+  if (!ctx.ship.classId.startsWith("starter")) {
+    try {
+      const quote = await ctx.api.getInsuranceQuote();
+      const premium = Number(quote?.premium ?? quote?.cost ?? 0);
+      const walletPct = ctx.player.credits > 0 ? premium / ctx.player.credits : 1;
+      if (premium > 0 && walletPct <= 0.15) { // Max 15% of wallet on insurance
+        await ctx.api.buyInsurance(360); // ~1 hour coverage
+        yield `insured new ship (${premium}cr premium)`;
+      }
+    } catch { /* insurance optional — don't fail upgrade */ }
+  }
 
   // Log the upgrade
   console.log(`[${ctx.botId}] Ship upgrade: ${oldShipClass} → ${targetShipClass} (cost ${price}cr)`);

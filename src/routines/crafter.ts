@@ -64,8 +64,14 @@ export async function* crafter(ctx: BotContext): AsyncGenerator<RoutineYield, vo
         } else {
           const recipes = ctx.crafting.findRecipesForItem(orderTarget);
           if (recipes.length > 0) {
-            recipeId = recipes[0].id;
-            yield `work order: craft ${orderTarget.replace(/_/g, " ")} via ${recipes[0].name ?? recipes[0].id} (priority ${order.priority})`;
+            // Pick most efficient recipe: highest output per input unit
+            const best = recipes.reduce((a, b) => {
+              const effA = a.outputQuantity / Math.max(1, a.ingredients.reduce((s, i) => s + i.quantity, 0));
+              const effB = b.outputQuantity / Math.max(1, b.ingredients.reduce((s, i) => s + i.quantity, 0));
+              return effB > effA ? b : a;
+            });
+            recipeId = best.id;
+            yield `work order: craft ${orderTarget.replace(/_/g, " ")} via ${best.name ?? best.id} (priority ${order.priority})`;
           } else {
             yield `work order: craft ${orderTarget.replace(/_/g, " ")} — no recipe found, auto-discovering`;
           }

@@ -47,10 +47,10 @@ const PRI = {
 
 /** Tier 1: Strategic — gates facility builds and high-value crafting */
 const STRATEGIC_ORES: Record<string, { minStock: number; reason: string; craftInto?: string; recipe?: string; canBuy?: boolean }> = {
-  silicon_ore:    { minStock: 600, reason: "CRITICAL: optical fiber → Intel Terminal", craftInto: "optical_fiber_bundle", recipe: "spin_optical_fiber", canBuy: true },
-  energy_crystal: { minStock: 500, reason: "optical fiber + circuit boards + fuel cells", craftInto: "optical_fiber_bundle", recipe: "spin_optical_fiber" },
-  palladium_ore:  { minStock: 200, reason: "superconductor (560cr) + sensor array (760cr)", craftInto: "superconductor", recipe: "create_superconductor" },
-  iridium_ore:    { minStock: 100, reason: "superconductor (560cr)", craftInto: "superconductor", recipe: "create_superconductor" },
+  silicon_ore:    { minStock: 600, reason: "CRITICAL: optical fiber → Intel Terminal", craftInto: "optical_fiber_bundle", recipe: "optical_fiber_bundle", canBuy: true },
+  energy_crystal: { minStock: 500, reason: "optical fiber + circuit boards + fuel cells", craftInto: "optical_fiber_bundle", recipe: "optical_fiber_bundle" },
+  palladium_ore:  { minStock: 200, reason: "superconductor (560cr) + sensor array (760cr)", craftInto: "superconductor", recipe: "superconductor" },
+  iridium_ore:    { minStock: 100, reason: "superconductor (560cr)", craftInto: "superconductor", recipe: "superconductor" },
 };
 
 /** Items to search for at other stations (bots should check markets for these) */
@@ -59,11 +59,12 @@ const SEARCH_ITEMS = [
   { itemId: "optical_fiber_bundle", reason: "Intel Terminal + Trade Ledger", quantity: 200 },
 ];
 
-/** Tier 2: Supply chain — consumed by crafters for sellable output */
+/** Tier 2: Supply chain — consumed by crafters for sellable output.
+ *  recipe = output item ID (crafter finds best recipe via findRecipesForItem) */
 const SUPPLY_CHAIN_ORES: Record<string, { minStock: number; craftInto: string; recipe: string; sellValue: number }> = {
-  iron_ore:     { minStock: 2000, craftInto: "steel_plate", recipe: "smelt_steel", sellValue: 45 },
-  copper_ore:   { minStock: 1000, craftInto: "copper_wiring", recipe: "draw_copper_wire", sellValue: 38 },
-  titanium_ore: { minStock: 500, craftInto: "titanium_alloy", recipe: "refine_titanium", sellValue: 120 },
+  iron_ore:     { minStock: 2000, craftInto: "steel_plate", recipe: "steel_plate", sellValue: 45 },
+  copper_ore:   { minStock: 1000, craftInto: "copper_wiring", recipe: "copper_wiring", sellValue: 38 },
+  titanium_ore: { minStock: 500, craftInto: "titanium_alloy", recipe: "titanium_alloy", sellValue: 120 },
 };
 
 /** Tier 3: Revenue — high value ores sold directly */
@@ -610,7 +611,7 @@ export class OrderEngine {
     const fuelCells = this.factionInventory.get("fuel_cell") ?? 0;
     if (fuelCells < 100) {
       orders.push({
-        type: "craft", targetId: "craft_fuel_cell",
+        type: "craft", targetId: "fuel_cell",
         description: `Craft fuel cells (${fuelCells} in storage, need 100)`,
         priority: PRI.SUPPLY_MED, reason: "low_fuel_cells",
       });
@@ -646,7 +647,7 @@ export class OrderEngine {
     if (opticalFiberNeeded > 0 && silicon >= 3 && energyCrystal >= 2) {
       const canCraft = Math.min(Math.floor(silicon / 3), Math.floor(energyCrystal / 2), opticalFiberNeeded);
       orders.push({
-        type: "craft", targetId: "spin_optical_fiber",
+        type: "craft", targetId: "optical_fiber_bundle",
         description: `CRITICAL: craft ${canCraft} optical fiber (${opticalFiber}/${opticalFiber + opticalFiberNeeded} for Trade Ledger)`,
         priority: PRI.MAINTENANCE, reason: "facility: optical fiber → Trade Ledger",
         quantity: Math.min(canCraft, 10),
@@ -658,7 +659,7 @@ export class OrderEngine {
     const circuitBoardsNeeded = (this.facilityMaterialNeeds.get("circuit_board") ?? 350) - circuitBoards;
     if (circuitBoardsNeeded > 0) {
       orders.push({
-        type: "craft", targetId: "fabricate_circuit_boards",
+        type: "craft", targetId: "circuit_board",
         description: `STRATEGIC: craft circuit boards (${circuitBoards}, need ${circuitBoards + circuitBoardsNeeded} for facilities)`,
         priority: PRI.FACILITY - 2, reason: "facility: circuit boards",
         quantity: Math.min(10, circuitBoardsNeeded),
@@ -676,7 +677,7 @@ export class OrderEngine {
       );
       if (canCraftCB > 0) {
         orders.push({
-          type: "craft", targetId: "fabricate_circuit_boards",
+          type: "craft", targetId: "circuit_board",
           description: `Supply chain: circuit boards for power cells (${circuitBoardStock} in stock, need 100+)`,
           priority: PRI.FACILITY + 2, // Above power cells (86) so supply stays ahead
           reason: "supply_chain: circuit boards → power cells",
@@ -695,7 +696,7 @@ export class OrderEngine {
       const canCraft = Math.min(Math.floor(energyCrystal), Math.floor(steelPlates), 10);
       if (fuelCells < FUEL_CELL_RESERVE) {
         orders.push({
-          type: "craft", targetId: "assemble_fuel_cells",
+          type: "craft", targetId: "fuel_cell",
           description: `CRITICAL: craft fuel cells (${fuelCells}/${FUEL_CELL_RESERVE} reserve)`,
           priority: PRI.MAINTENANCE + 5, reason: "fuel_cell_reserve",
           quantity: canCraft,
@@ -703,7 +704,7 @@ export class OrderEngine {
         });
       } else {
         orders.push({
-          type: "craft", targetId: "assemble_fuel_cells",
+          type: "craft", targetId: "fuel_cell",
           description: `Craft fuel cells for sale (${fuelCells} in stock, ${FUEL_CELL_RESERVE} reserved)`,
           priority: PRI.CRAFT, reason: "fuel_cell_sell",
           quantity: canCraft,
@@ -1092,21 +1093,21 @@ export class OrderEngine {
     const hasSilicon = (this.factionInventory.get("silicon_ore") ?? 0) > 30;
     if (hasIron) {
       orders.push({
-        type: "craft", targetId: "smelt_steel",
+        type: "craft", targetId: "steel_plate",
         description: "Craft steel plates from iron (standing)",
         priority: PRI.STANDING + 5, reason: "standing_craft",
       });
     }
     if (hasCopper) {
       orders.push({
-        type: "craft", targetId: "draw_copper_wire",
+        type: "craft", targetId: "copper_wiring",
         description: "Craft copper wiring (standing)",
         priority: PRI.STANDING + 5, reason: "standing_craft",
       });
     }
     if (hasSilicon) {
       orders.push({
-        type: "craft", targetId: "spin_optical_fiber",
+        type: "craft", targetId: "optical_fiber_bundle",
         description: "Craft optical fiber bundles from silicon (standing)",
         priority: PRI.STANDING + 8, reason: "standing_craft_facility",
       });
