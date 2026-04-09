@@ -1854,7 +1854,10 @@ async function* factionSellLoop(
           ctx.logger.logLedger?.({ type: "sell_order_create", botId: ctx.botId, itemId: c.itemId, itemName, quantity: c.quantity, credits: pricing.listPrice * c.quantity, details: `trader sell order fallback @ ${pricing.listPrice}cr/ea` }).catch(() => {});
           sold = true;
         } catch (err) {
-          yield `sell order failed: ${err instanceof Error ? err.message : String(err)}`;
+          const errMsg = err instanceof Error ? err.message : String(err);
+          yield `sell order failed: ${errMsg}`;
+          // Station facility issue — don't blacklist the item, it's sellable elsewhere
+          if (errMsg.includes("no_faction_market") || errMsg.includes("no_faction_storage")) continue;
         }
       }
     }
