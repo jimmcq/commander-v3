@@ -592,7 +592,10 @@ export async function ensureInsurance(ctx: BotContext): Promise<void> {
     await ctx.refreshState();
     log(ctx, `bought insurance: ${premium}cr for ${INSURANCE_DURATION_TICKS} ticks`);
   } catch (err) {
-    logWarn(ctx, `insurance purchase failed: ${err instanceof Error ? err.message : err}`);
+    const msg = err instanceof Error ? err.message : String(err);
+    // Suppress non-insurable ships (cheap/starter ships replaced for free)
+    if (msg.includes("not_insurable")) return;
+    logWarn(ctx, `insurance purchase failed: ${msg}`);
   }
 }
 
