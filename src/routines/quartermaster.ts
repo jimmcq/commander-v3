@@ -928,6 +928,12 @@ async function* buyEquipmentModules(
     return;
   }
 
+  // Only buy modules if we can deposit them to faction storage
+  const fStnMod = ctx.fleetConfig.factionStorageStation;
+  if (fStnMod && ctx.player.dockedAtBase !== fStnMod) {
+    return; // Not at faction station — can't store purchased modules
+  }
+
   // Budget: keep a 2000cr reserve, spend the rest on modules
   // Module buying is the quartermaster's primary job — don't be stingy
   const reserve = 2000;
