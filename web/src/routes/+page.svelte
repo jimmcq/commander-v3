@@ -2,6 +2,7 @@
 	import { onMount } from "svelte";
 	import { bots, fleetStats, connectionState, economy, getAuthHeaders } from "$stores/websocket";
 	import CreditsChart from "$lib/components/CreditsChart.svelte";
+	import { roleLabel } from "$lib/roles";
 
 	// Per-bot 24h revenue from financial events
 	let botRevenue24h = $state<Record<string, number>>({});
@@ -24,25 +25,6 @@
 		const interval = setInterval(fetchBotRevenue, 60000); // Refresh every minute
 		return () => clearInterval(interval);
 	});
-
-	const ROLE_LABELS: Record<string, string> = {
-		ore_miner: "Miner-Ore",
-		crystal_miner: "Miner-Crystal",
-		gas_harvester: "Miner-Gas",
-		ice_harvester: "Miner-Ice",
-		explorer: "Explorer",
-		trader: "Trader",
-		crafter: "Crafter",
-		quartermaster: "Quartermaster",
-		hunter: "Hunter",
-		mission_runner: "Mission Runner",
-		ship_dealer: "Ship Dealer",
-		shipwright: "Crafter-Shipwright",
-	};
-	function roleLabel(role: string | null): string {
-		if (!role) return "--";
-		return ROLE_LABELS[role] ?? role.replace(/_/g, " ");
-	}
 
 	function poiIcon(name: string | null): string {
 		if (!name) return "";

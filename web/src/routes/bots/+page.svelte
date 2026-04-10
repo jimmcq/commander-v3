@@ -1,23 +1,6 @@
 <script lang="ts">
 	import { bots, send } from "$stores/websocket";
-
-	const ROLE_LABELS: Record<string, string> = {
-		ore_miner: "Miner-Ore",
-		crystal_miner: "Miner-Crystal",
-		gas_harvester: "Miner-Gas",
-		ice_harvester: "Miner-Ice",
-		explorer: "Explorer",
-		trader: "Trader",
-		crafter: "Crafter",
-		quartermaster: "Quartermaster",
-		hunter: "Hunter",
-		mission_runner: "Mission Runner",
-		ship_dealer: "Ship Dealer",
-		shipwright: "Crafter-Shipwright",
-	};
-	function roleDisplayName(role: string): string {
-		return ROLE_LABELS[role] ?? role.replace(/_/g, " ");
-	}
+	import { roleLabel as roleDisplayName } from "$lib/roles";
 
 	let showAddDialog = $state(false);
 	let newUsername = $state("");
@@ -146,6 +129,12 @@
 							class:offline={bot.status === "stopping"}
 						></span>
 					</div>
+
+					{#if bot.status === "error" && bot.lastError}
+						<div class="mb-2 px-2 py-1.5 rounded bg-claw-red/10 border border-claw-red/30 text-[10px] text-claw-red">
+							<span class="font-bold">ERROR:</span> {bot.lastError}
+						</div>
+					{/if}
 
 					<div class="space-y-1.5 text-xs">
 						<div class="flex justify-between">
