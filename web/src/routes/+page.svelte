@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from "svelte";
-	import { bots, fleetStats, commanderLog, activityLog, connectionState, economy, getAuthHeaders } from "$stores/websocket";
+	import { bots, fleetStats, connectionState, economy, getAuthHeaders } from "$stores/websocket";
 	import CreditsChart from "$lib/components/CreditsChart.svelte";
 
 	// Per-bot 24h revenue from financial events
@@ -58,24 +58,29 @@
 		return "📍";
 	}
 
-	// Derive top trades from activity log (merged from Activity page)
-	const topTrades = $derived.by(() => {
-		return $activityLog
-			.filter(e => e.message.includes("sold") || e.message.includes("Sold"))
-			.slice(0, 5);
-	});
-
-	const craftingFeed = $derived.by(() => {
-		return $activityLog
-			.filter(e => e.message.includes("craft") || e.message.includes("Craft"))
-			.slice(0, 5);
-	});
-
-	const sortedBotsByRevenue = $derived.by(() => {
-		return [...$bots]
-			.map(b => ({ ...b, rev: botRevenue24h[b.id] ?? 0 }))
-			.filter(b => b.status === "running" || b.status === "ready")
-			.sort((a, b) => b.rev - a.rev);
+	// Sortable roster — default sort by 24h revenue descending
+	let sortKey = $state<"revenue" | "credits" | "name" | "fuel" | "cargo">("revenue");
+	let sortDir = $state<"asc" | "desc">("desc");
+	function toggleSort(key: typeof sortKey) {
+		if (sortKey === key) sortDir = sortDir === "asc" ? "desc" : "asc";
+		else { sortKey = key; sortDir = "desc"; }
+	}
+	const sortedBots = $derived.by(() => {
+		const enriched = [...$bots].map(b => ({ ...b, rev: botRevenue24h[b.id] ?? 0 }));
+		const dir = sortDir === "asc" ? 1 : -1;
+		enriched.sort((a, b) => {
+			let av: number | string = 0, bv: number | string = 0;
+			switch (sortKey) {
+				case "revenue": av = a.rev; bv = b.rev; break;
+				case "credits": av = a.credits; bv = b.credits; break;
+				case "name": av = a.username.toLowerCase(); bv = b.username.toLowerCase(); break;
+				case "fuel": av = a.fuelPct; bv = b.fuelPct; break;
+				case "cargo": av = a.cargoPct; bv = b.cargoPct; break;
+			}
+			if (typeof av === "string") return dir * (av as string).localeCompare(bv as string);
+			return dir * ((av as number) - (bv as number));
+		});
+		return enriched;
 	});
 
 	const routineRevenue = $derived.by(() => {
@@ -153,32 +158,7 @@
 			</div>
 		</div>
 
-		<!-- Profit Leaderboard + Revenue by Routine -->
-		<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-			<!-- Bot Leaderboard -->
-			<div class="card p-4">
-				<h2 class="text-xs font-semibold text-chrome-silver uppercase tracking-wider mb-3">Bot Leaderboard (24h)</h2>
-				<div class="space-y-1.5">
-					{#each sortedBotsByRevenue.slice(0, 10) as bot, i}
-						{@const maxRev = Math.max(1, Math.abs(sortedBotsByRevenue[0]?.rev ?? 1))}
-						<a href="/bots/{bot.id}" class="flex items-center gap-2 text-xs py-1.5 px-2 rounded hover:bg-deep-void/50 transition-colors">
-							<span class="w-5 text-right font-mono {i === 0 ? 'text-warning-yellow' : i === 1 ? 'text-chrome-silver' : i === 2 ? 'text-shell-orange' : 'text-hull-grey'}">
-								{i < 3 ? ['🥇','🥈','🥉'][i] : `${i+1}.`}
-							</span>
-							<span class="text-star-white flex-1 truncate">{bot.username}</span>
-							<span class="text-[10px] text-hull-grey">{bot.routine ?? "--"}</span>
-							<div class="w-20 h-1.5 bg-deep-void/50 rounded-full overflow-hidden">
-								<div class="h-full rounded-full {bot.rev >= 0 ? 'bg-bio-green/60' : 'bg-claw-red/60'}" style="width: {Math.min(100, (Math.abs(bot.rev) / maxRev) * 100)}%"></div>
-							</div>
-							<span class="w-16 text-right font-mono {bot.rev >= 0 ? 'text-bio-green' : 'text-claw-red'}">
-								{bot.rev >= 0 ? '+' : ''}{bot.rev.toLocaleString()}
-							</span>
-						</a>
-					{/each}
-				</div>
-			</div>
-
-			<!-- Revenue by Routine -->
+		<!-- Revenue by Routine (full width — leaderboard removed, sort roster instead) -->
 			<div class="card p-4">
 				<h2 class="text-xs font-semibold text-chrome-silver uppercase tracking-wider mb-3">Revenue by Routine</h2>
 				<div class="space-y-2">
@@ -217,7 +197,6 @@
 				</div>
 				{/if}
 			</div>
-		</div>
 
 		<!-- Bot roster table (full width) -->
 			<div class="card p-4">
@@ -236,19 +215,19 @@
 						<table class="w-full text-sm">
 							<thead>
 								<tr class="text-left text-xs text-chrome-silver uppercase tracking-wider border-b border-hull-grey/30">
-									<th class="pb-2 pr-3">Bot</th>
+									<th class="pb-2 pr-3 cursor-pointer hover:text-plasma-cyan select-none" onclick={() => toggleSort("name")}>Bot{sortKey === "name" ? (sortDir === "desc" ? " ↓" : " ↑") : ""}</th>
 									<th class="pb-2 pr-3">System</th>
 									<th class="pb-2 pr-3">POI</th>
 									<th class="pb-2 pr-3">Order</th>
 									<th class="pb-2 pr-3">State</th>
-									<th class="pb-2 pr-3 text-right">Credits</th>
-									<th class="pb-2 pr-3 text-right">24h</th>
-									<th class="pb-2 pr-3 text-right">Fuel</th>
-									<th class="pb-2 text-right">Cargo</th>
+									<th class="pb-2 pr-3 text-right cursor-pointer hover:text-plasma-cyan select-none" onclick={() => toggleSort("credits")}>Credits{sortKey === "credits" ? (sortDir === "desc" ? " ↓" : " ↑") : ""}</th>
+									<th class="pb-2 pr-3 text-right cursor-pointer hover:text-plasma-cyan select-none" onclick={() => toggleSort("revenue")}>24h{sortKey === "revenue" ? (sortDir === "desc" ? " ↓" : " ↑") : ""}</th>
+									<th class="pb-2 pr-3 text-right cursor-pointer hover:text-plasma-cyan select-none" onclick={() => toggleSort("fuel")}>Fuel{sortKey === "fuel" ? (sortDir === "desc" ? " ↓" : " ↑") : ""}</th>
+									<th class="pb-2 text-right cursor-pointer hover:text-plasma-cyan select-none" onclick={() => toggleSort("cargo")}>Cargo{sortKey === "cargo" ? (sortDir === "desc" ? " ↓" : " ↑") : ""}</th>
 								</tr>
 							</thead>
 							<tbody class="divide-y divide-hull-grey/20">
-								{#each $bots as bot}
+								{#each sortedBots as bot}
 									<tr class="hover:bg-nebula-blue/20 transition-colors">
 										<td class="py-1.5 pr-3">
 											<div class="flex items-center gap-1.5">

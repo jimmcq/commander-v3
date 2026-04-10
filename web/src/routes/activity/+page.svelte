@@ -1,19 +1,17 @@
 <script lang="ts">
-	import { activityLog, commanderLog, economy } from "$stores/websocket";
+	import { activityLog } from "$stores/websocket";
 
-	// Derive top trades from activity log (sell events)
-	const topTrades = $derived.by(() => {
-		const sells = $activityLog
-			.filter(e => e.message.includes("sold") || e.message.includes("Sold"))
-			.slice(0, 5);
-		return sells;
+	// Use typed event filtering instead of fragile string matching
+	const recentTrades = $derived.by(() => {
+		return $activityLog
+			.filter(e => e.eventType === "npc_sell" || e.eventType === "sell_order_fill")
+			.slice(0, 8);
 	});
 
-	// Derive crafting events
-	const craftingFeed = $derived.by(() => {
+	const recentCrafts = $derived.by(() => {
 		return $activityLog
-			.filter(e => e.message.includes("craft") || e.message.includes("Craft"))
-			.slice(0, 5);
+			.filter(e => e.eventType === "craft" || e.eventType === "crafted")
+			.slice(0, 8);
 	});
 </script>
 
@@ -62,14 +60,14 @@
 
 		<!-- Stat cards sidebar -->
 		<div class="space-y-3">
-			<!-- Top Trades -->
+			<!-- Recent Trades (typed event filter, not string matching) -->
 			<div class="card p-4">
-				<h3 class="text-xs text-chrome-silver uppercase tracking-wider mb-2">Top Trades</h3>
-				{#if topTrades.length === 0}
+				<h3 class="text-xs text-chrome-silver uppercase tracking-wider mb-2">Recent Trades</h3>
+				{#if recentTrades.length === 0}
 					<p class="text-xs text-hull-grey text-center py-3">No trades yet</p>
 				{:else}
 					<div class="space-y-1.5">
-						{#each topTrades as trade}
+						{#each recentTrades as trade}
 							<div class="text-xs">
 								<span class="text-hull-grey mono">{trade.timestamp.slice(11, 19)}</span>
 								{#if trade.botId}
@@ -82,33 +80,14 @@
 				{/if}
 			</div>
 
-			<!-- Top Items (from economy open orders) -->
-			<div class="card p-4">
-				<h3 class="text-xs text-chrome-silver uppercase tracking-wider mb-2">Open Orders</h3>
-				{#if !$economy?.openOrders?.length}
-					<p class="text-xs text-hull-grey text-center py-3">No orders</p>
-				{:else}
-					<div class="space-y-1.5">
-						{#each $economy.openOrders.slice(0, 5) as order}
-							<div class="flex items-center justify-between text-xs">
-								<span class="text-star-white truncate">{order.itemName}</span>
-								<span class="{order.type === 'buy' ? 'text-bio-green' : 'text-shell-orange'} mono">
-									{order.type === "buy" ? "B" : "S"} {order.priceEach}
-								</span>
-							</div>
-						{/each}
-					</div>
-				{/if}
-			</div>
-
-			<!-- Crafting Feed -->
+			<!-- Recent Crafting -->
 			<div class="card p-4">
 				<h3 class="text-xs text-chrome-silver uppercase tracking-wider mb-2">Crafting Feed</h3>
-				{#if craftingFeed.length === 0}
+				{#if recentCrafts.length === 0}
 					<p class="text-xs text-hull-grey text-center py-3">No crafting activity</p>
 				{:else}
 					<div class="space-y-1.5">
-						{#each craftingFeed as craft}
+						{#each recentCrafts as craft}
 							<div class="text-xs">
 								<span class="text-hull-grey mono">{craft.timestamp.slice(11, 19)}</span>
 								<p class="text-chrome-silver truncate">{craft.message}</p>
@@ -118,21 +97,10 @@
 				{/if}
 			</div>
 
-			<!-- Commander decisions summary -->
-			<div class="card p-4">
-				<h3 class="text-xs text-chrome-silver uppercase tracking-wider mb-2">Commander</h3>
-				{#if $commanderLog.length === 0}
-					<p class="text-xs text-hull-grey text-center py-3">No decisions</p>
-				{:else}
-					<div class="space-y-1.5">
-						{#each $commanderLog.slice(0, 3) as decision}
-							<div class="text-xs border-l-2 border-plasma-cyan/50 pl-2">
-								<p class="text-chrome-silver truncate">{decision.reasoning}</p>
-								<p class="text-hull-grey">{decision.assignments.length} assign(s)</p>
-							</div>
-						{/each}
-					</div>
-				{/if}
+			<!-- Note: Open Orders moved to Economy tab. Commander decisions on Commander/Social tabs. -->
+			<div class="card p-4 text-xs text-hull-grey">
+				<p>Open Orders → <a href="/economy" class="text-plasma-cyan">Economy</a></p>
+				<p class="mt-1">Commander Decisions → <a href="/commander" class="text-plasma-cyan">Orders</a></p>
 			</div>
 		</div>
 	</div>
