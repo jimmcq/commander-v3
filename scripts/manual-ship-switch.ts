@@ -33,7 +33,17 @@ async function main() {
 	console.log(`[1] Found bot — has session: ${!!bot.sessionId}`);
 
 	console.log(`[2] Creating API client and restoring session...`);
-	const api = new ApiClient(username, sessionStore);
+	// Stub logger
+	const stubLogger: any = {
+		recordCall: () => {},
+		logFactionCreditTx: () => {},
+		logLedger: () => Promise.resolve(),
+	};
+	const api = new ApiClient({
+		username,
+		sessionStore,
+		logger: stubLogger,
+	});
 	await api.restoreSession();
 
 	console.log(`[3] Logging in (or refreshing existing session)...`);
