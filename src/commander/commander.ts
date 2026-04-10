@@ -329,6 +329,12 @@ export class Commander {
       if (bot && bot.routine === a.routine && bot.status === "running") continue;
       // Don't interrupt protected routines
       if (bot && bot.status === "running" && bot.routine && ["ship_upgrade", "refit", "return_home", "scout"].includes(bot.routine)) continue;
+      // Naked bot (no modules) — send home for refit, don't assign work
+      if (bot && (bot.moduleIds ?? []).length === 0 && a.routine !== "return_home" && a.routine !== "refit") {
+        console.log(`[Commander] ${a.botId} has no modules — sending home for refit`);
+        a.routine = "return_home";
+        a.params = {};
+      }
 
       try {
         await this.deps.assignRoutine(a.botId, a.routine, a.params);
