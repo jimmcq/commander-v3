@@ -189,20 +189,20 @@
 			</div>
 		</div>
 		<div class="grid grid-cols-2 md:grid-cols-4 gap-3">
-			<div class="card p-3">
-				<p class="text-[10px] text-chrome-silver uppercase tracking-wider">Period Start</p>
+			<div class="card p-3" title="Balance at start of selected time range">
+				<p class="text-[10px] text-chrome-silver uppercase tracking-wider">Range Open Bal.</p>
 				<p class="text-sm font-bold mono text-star-white mt-1">{startingBalance.toLocaleString()} cr</p>
 			</div>
 			<div class="card p-3">
-				<p class="text-[10px] text-chrome-silver uppercase tracking-wider">Debits</p>
+				<p class="text-[10px] text-chrome-silver uppercase tracking-wider">Debits (filtered)</p>
 				<p class="text-sm font-bold mono text-claw-red mt-1">-{filteredDebits.toLocaleString()} cr</p>
 			</div>
 			<div class="card p-3">
-				<p class="text-[10px] text-chrome-silver uppercase tracking-wider">Credits</p>
+				<p class="text-[10px] text-chrome-silver uppercase tracking-wider">Credits (filtered)</p>
 				<p class="text-sm font-bold mono text-bio-green mt-1">+{filteredCredits.toLocaleString()} cr</p>
 			</div>
-			<div class="card p-3">
-				<p class="text-[10px] text-chrome-silver uppercase tracking-wider">Period End</p>
+			<div class="card p-3" title="Balance after applying filtered debits/credits to range opening balance">
+				<p class="text-[10px] text-chrome-silver uppercase tracking-wider">Range Close Bal.</p>
 				<p class="text-sm font-bold mono text-star-white mt-1">{endingBalance.toLocaleString()} cr</p>
 			</div>
 		</div>

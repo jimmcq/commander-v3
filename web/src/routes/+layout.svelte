@@ -8,6 +8,7 @@
 		disconnect,
 		connectionState,
 		fleetStats,
+		factionState,
 		notifications,
 		unreadNotifications,
 		clearNotifications,
@@ -188,6 +189,12 @@
 
 		<!-- Right side stats -->
 		<div class="hidden md:flex items-center gap-4 text-sm text-chrome-silver mr-3">
+			{#if $factionState}
+				<span class="flex items-center gap-1.5" title="Faction treasury">
+					<span class="text-hull-grey">TR:</span>
+					<span class="mono font-medium text-plasma-cyan">{($factionState.credits ?? 0).toLocaleString()}cr</span>
+				</span>
+			{/if}
 			{#if $fleetStats}
 				<span class="flex items-center gap-1.5">
 					<span
@@ -197,8 +204,8 @@
 					></span>
 					<span class="mono">{$fleetStats.activeBots}/{$fleetStats.totalBots}</span>
 				</span>
-				<span class="{$fleetStats.creditsPerHour >= 0 ? 'text-bio-green' : 'text-claw-red'} mono font-medium">
-					{$fleetStats.creditsPerHour >= 0 ? '+' : ''}{$fleetStats.creditsPerHour.toLocaleString()} earned
+				<span class="{$fleetStats.creditsPerHour >= 0 ? 'text-bio-green' : 'text-claw-red'} mono font-medium" title="Net hourly cash flow (revenue - facility upkeep)">
+					{$fleetStats.creditsPerHour >= 0 ? '+' : ''}{$fleetStats.creditsPerHour.toLocaleString()}/hr
 				</span>
 			{:else}
 				<span class="text-hull-grey">No data</span>
