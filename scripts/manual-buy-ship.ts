@@ -39,6 +39,23 @@ async function main() {
 	console.log(`[3] Buying ${targetClass} (using commission_ship)...`);
 	const buyResult = await api.commissionShip(targetClass);
 	console.log(`[3] Buy result:`, JSON.stringify(buyResult, null, 2));
+	// commissionShip already records via logger.recordCreditMovement, but this script
+	// uses a stub logger so we add explicit ledger entry here
+	const { recordMovement } = await import("../src/data/credit-ledger");
+	const creditsPaid = Number((buyResult as any).credits_paid ?? 0);
+	if (creditsPaid > 0) {
+		await recordMovement(conn.db, {
+			tenantId: TENANT_ID,
+			timestamp: Date.now(),
+			account: username,
+			type: "commission_ship",
+			delta: -creditsPaid,
+			balanceAfter: Number((buyResult as any).credits_left ?? 0),
+			source: "scripts/manual-buy-ship.ts",
+			details: `MANUAL ${targetClass} commission_id=${(buyResult as any).commission_id ?? "?"}`,
+		});
+		console.log(`[ledger] Recorded -${creditsPaid}cr for ${username}`);
+	}
 
 	const newShipId = (buyResult as any).ship_id ?? (buyResult as any).shipId;
 	if (newShipId) {

@@ -350,6 +350,50 @@ export const factionTransactions = pgTable("faction_transactions", {
   index("idx_faction_tx_type").on(table.type),
 ]);
 
+// ── Credit Movements Ledger ──
+// Records every credit-affecting event with before/after balances
+// for full reconciliation. Includes manual operations.
+
+export const creditMovements = pgTable("credit_movements", {
+  id: serial("id").primaryKey(),
+  tenantId: text("tenant_id").notNull(),
+  timestamp: bigint("timestamp", { mode: "number" }).notNull(),
+  account: text("account").notNull(), // bot username or "faction_treasury"
+  type: text("type").notNull(), // "buy" | "sell" | "commission_ship" | "buy_ship" | "deposit" | "withdraw" | "tax" | "fuel" | "repair" | "insurance" | "manual" | "snapshot_diff"
+  delta: doublePrecision("delta").notNull(), // +inflow / -outflow
+  balanceBefore: doublePrecision("balance_before"),
+  balanceAfter: doublePrecision("balance_after"),
+  source: text("source"), // script name or routine name
+  details: text("details"),
+}, (table) => [
+  index("idx_credit_mov_tenant").on(table.tenantId),
+  index("idx_credit_mov_ts").on(table.timestamp),
+  index("idx_credit_mov_account").on(table.account),
+  index("idx_credit_mov_type").on(table.type),
+]);
+
+// ── Credit Discrepancies ──
+// Detected mismatches between recorded movements and actual balance changes.
+
+export const creditDiscrepancies = pgTable("credit_discrepancies", {
+  id: serial("id").primaryKey(),
+  tenantId: text("tenant_id").notNull(),
+  detectedAt: bigint("detected_at", { mode: "number" }).notNull(),
+  account: text("account").notNull(),
+  windowStart: bigint("window_start", { mode: "number" }).notNull(),
+  windowEnd: bigint("window_end", { mode: "number" }).notNull(),
+  expectedDelta: doublePrecision("expected_delta").notNull(), // sum of logged movements
+  actualDelta: doublePrecision("actual_delta").notNull(), // observed balance change
+  unaccounted: doublePrecision("unaccounted").notNull(), // actual - expected
+  reviewed: integer("reviewed").notNull().default(0), // 0 = open, 1 = reviewed
+  notes: text("notes"),
+}, (table) => [
+  index("idx_discrep_tenant").on(table.tenantId),
+  index("idx_discrep_detected").on(table.detectedAt),
+  index("idx_discrep_account").on(table.account),
+  index("idx_discrep_open").on(table.reviewed),
+]);
+
 // ── Activity Log (bot routine state changes, persisted for dashboard history) ──
 
 export const activityLog = pgTable("activity_log", {

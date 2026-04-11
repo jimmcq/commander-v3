@@ -30,6 +30,25 @@ async function main() {
 
 	const result = await api.factionDepositCredits(amount);
 	console.log(`[2] Deposit ${amount.toLocaleString()}cr result:`, JSON.stringify(result, null, 2));
+
+	// Manual ledger entries (api uses stub logger here)
+	const { recordMovement } = await import("../src/data/credit-ledger");
+	const playerCredits = Number((result as any).player_credits ?? 0);
+	const factionCredits = Number((result as any).faction_credits ?? 0);
+	const ts = Date.now();
+	await recordMovement(conn.db, {
+		tenantId: TENANT_ID, timestamp: ts, account: username,
+		type: "faction_deposit", delta: -amount,
+		balanceBefore: playerCredits + amount, balanceAfter: playerCredits,
+		source: "scripts/manual-deposit-credits.ts", details: "MANUAL deposit to treasury",
+	});
+	await recordMovement(conn.db, {
+		tenantId: TENANT_ID, timestamp: ts, account: "faction_treasury",
+		type: "deposit_in", delta: amount,
+		balanceBefore: factionCredits - amount, balanceAfter: factionCredits,
+		source: "scripts/manual-deposit-credits.ts", details: `MANUAL from ${username}`,
+	});
+	console.log(`[ledger] Recorded -${amount}cr for ${username}, +${amount}cr for treasury`);
 	process.exit(0);
 }
 

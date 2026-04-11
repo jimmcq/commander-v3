@@ -34,6 +34,24 @@ async function main() {
 
 	const result = await api.factionWithdrawCredits(amount);
 	console.log(`[2] Withdraw result:`, JSON.stringify(result, null, 2));
+
+	const { recordMovement } = await import("../src/data/credit-ledger");
+	const playerCredits = Number((result as any).player_credits ?? 0);
+	const factionCredits = Number((result as any).faction_credits ?? 0);
+	const ts = Date.now();
+	await recordMovement(conn.db, {
+		tenantId: TENANT_ID, timestamp: ts, account: username,
+		type: "faction_withdraw", delta: amount,
+		balanceBefore: playerCredits - amount, balanceAfter: playerCredits,
+		source: "scripts/manual-withdraw-credits.ts", details: "MANUAL withdraw from treasury",
+	});
+	await recordMovement(conn.db, {
+		tenantId: TENANT_ID, timestamp: ts, account: "faction_treasury",
+		type: "withdraw_out", delta: -amount,
+		balanceBefore: factionCredits + amount, balanceAfter: factionCredits,
+		source: "scripts/manual-withdraw-credits.ts", details: `MANUAL to ${username}`,
+	});
+	console.log(`[ledger] Recorded +${amount}cr for ${username}, -${amount}cr for treasury`);
 	process.exit(0);
 }
 

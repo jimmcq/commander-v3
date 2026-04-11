@@ -230,6 +230,36 @@ export class TrainingLogger {
     });
   }
 
+  /** Record a credit movement for full-fidelity reconciliation */
+  async recordCreditMovement(entry: {
+    account: string;
+    type: string;
+    delta: number;
+    balanceBefore?: number;
+    balanceAfter?: number;
+    source?: string;
+    details?: string;
+  }): Promise<void> {
+    try {
+      // Use raw insert via creditMovements (avoids schema import here)
+      const { creditMovements } = await import("./schema");
+      await (this.db as any).insert(creditMovements).values({
+        tenantId: this.tenantId,
+        timestamp: Date.now(),
+        account: entry.account,
+        type: entry.type,
+        delta: entry.delta,
+        balanceBefore: entry.balanceBefore ?? null,
+        balanceAfter: entry.balanceAfter ?? null,
+        source: entry.source ?? null,
+        details: entry.details ?? null,
+      });
+    } catch (err) {
+      // Don't crash routine on logging failure
+      console.warn("[logger] recordCreditMovement failed:", err instanceof Error ? err.message : err);
+    }
+  }
+
 
   async getFinancialHistory(sinceMs: number, bucketMs: number): Promise<Array<{
     timestamp: number; revenue: number; cost: number; profit: number;

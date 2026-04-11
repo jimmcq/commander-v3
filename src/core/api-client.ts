@@ -577,7 +577,17 @@ export class ApiClient {
     const payload: Record<string, unknown> = { item_id: itemId, quantity };
     if (opts?.autoList) payload.auto_list = true;
     const data = await this.mutation<Record<string, unknown>>("sell", payload);
-    return normalizeTradeResult(data);
+    const result = normalizeTradeResult(data);
+    if (result.total > 0) {
+      this.logger.recordCreditMovement?.({
+        account: this.username,
+        type: "npc_sell",
+        delta: result.total,
+        source: "api.sell",
+        details: `${result.quantity}x ${itemId} @ ${result.priceEach}cr`,
+      }).catch(() => {});
+    }
+    return result;
   }
 
   async jettison(itemId: string, quantity: number): Promise<Record<string, unknown>> {
@@ -586,7 +596,17 @@ export class ApiClient {
 
   async buy(itemId: string, quantity: number): Promise<TradeResult> {
     const data = await this.mutation<Record<string, unknown>>("buy", { item_id: itemId, quantity });
-    return normalizeTradeResult(data);
+    const result = normalizeTradeResult(data);
+    if (result.total > 0) {
+      this.logger.recordCreditMovement?.({
+        account: this.username,
+        type: "npc_buy",
+        delta: -result.total,
+        source: "api.buy",
+        details: `${result.quantity}x ${itemId} @ ${result.priceEach}cr`,
+      }).catch(() => {});
+    }
+    return result;
   }
 
   /** Preview a purchase without executing — free query, no rate limit */
@@ -850,7 +870,30 @@ export class ApiClient {
   }
 
   async factionDepositCredits(amount: number): Promise<Record<string, unknown>> {
-    return this.mutation("faction_deposit_credits", { amount });
+    const result = await this.mutation<Record<string, unknown>>("faction_deposit_credits", { amount });
+    const playerCredits = Number((result as any).player_credits ?? NaN);
+    const factionCredits = Number((result as any).faction_credits ?? NaN);
+    // Bot lost credits
+    this.logger.recordCreditMovement?.({
+      account: this.username,
+      type: "faction_deposit",
+      delta: -amount,
+      balanceAfter: isNaN(playerCredits) ? undefined : playerCredits,
+      balanceBefore: isNaN(playerCredits) ? undefined : playerCredits + amount,
+      source: "api.factionDepositCredits",
+      details: `to faction treasury`,
+    }).catch(() => {});
+    // Treasury gained
+    this.logger.recordCreditMovement?.({
+      account: "faction_treasury",
+      type: "deposit_in",
+      delta: amount,
+      balanceAfter: isNaN(factionCredits) ? undefined : factionCredits,
+      balanceBefore: isNaN(factionCredits) ? undefined : factionCredits - amount,
+      source: "api.factionDepositCredits",
+      details: `from ${this.username}`,
+    }).catch(() => {});
+    return result;
   }
 
   async factionWithdrawItems(itemId: string, quantity: number): Promise<Record<string, unknown>> {
@@ -858,7 +901,28 @@ export class ApiClient {
   }
 
   async factionWithdrawCredits(amount: number): Promise<Record<string, unknown>> {
-    return this.mutation("faction_withdraw_credits", { amount });
+    const result = await this.mutation<Record<string, unknown>>("faction_withdraw_credits", { amount });
+    const playerCredits = Number((result as any).player_credits ?? NaN);
+    const factionCredits = Number((result as any).faction_credits ?? NaN);
+    this.logger.recordCreditMovement?.({
+      account: this.username,
+      type: "faction_withdraw",
+      delta: amount,
+      balanceAfter: isNaN(playerCredits) ? undefined : playerCredits,
+      balanceBefore: isNaN(playerCredits) ? undefined : playerCredits - amount,
+      source: "api.factionWithdrawCredits",
+      details: `from faction treasury`,
+    }).catch(() => {});
+    this.logger.recordCreditMovement?.({
+      account: "faction_treasury",
+      type: "withdraw_out",
+      delta: -amount,
+      balanceAfter: isNaN(factionCredits) ? undefined : factionCredits,
+      balanceBefore: isNaN(factionCredits) ? undefined : factionCredits + amount,
+      source: "api.factionWithdrawCredits",
+      details: `to ${this.username}`,
+    }).catch(() => {});
+    return result;
   }
 
   // ── Module Repair ──
@@ -902,7 +966,22 @@ export class ApiClient {
   }
 
   async commissionShip(shipClass: string, provideMaterials?: boolean): Promise<Record<string, unknown>> {
-    return this.mutation("commission_ship", { ship_class: shipClass, provide_materials: provideMaterials });
+    const result = await this.mutation<Record<string, unknown>>("commission_ship", { ship_class: shipClass, provide_materials: provideMaterials });
+    // Record credit movement for reconciliation
+    const creditsPaid = Number((result as any).credits_paid ?? 0);
+    const creditsLeft = Number((result as any).credits_left ?? NaN);
+    if (creditsPaid > 0) {
+      this.logger.recordCreditMovement?.({
+        account: this.username,
+        type: "commission_ship",
+        delta: -creditsPaid,
+        balanceAfter: isNaN(creditsLeft) ? undefined : creditsLeft,
+        balanceBefore: isNaN(creditsLeft) ? undefined : creditsLeft + creditsPaid,
+        source: "api.commissionShip",
+        details: `${shipClass} commission_id=${(result as any).commission_id ?? "?"} status=${(result as any).status ?? "?"}`,
+      }).catch(() => {});
+    }
+    return result;
   }
 
   async claimCommission(commissionId: string): Promise<Record<string, unknown>> {
