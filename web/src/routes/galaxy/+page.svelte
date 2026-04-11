@@ -1,6 +1,12 @@
 <script lang="ts">
-	import { bots, galaxySystems } from "$stores/websocket";
+	import { onMount } from "svelte";
+	import { bots, galaxySystems, send } from "$stores/websocket";
 	import type { GalaxySystemSummary } from "../../../../src/types/protocol";
+
+	// Request fresh galaxy data on mount — store may be empty after a service restart
+	onMount(() => {
+		send({ type: "request_galaxy" });
+	});
 
 	// ── Sort + filter state ──
 	type SortKey = "name" | "empire" | "jumps" | "pois" | "bots" | "intel" | "resources";
