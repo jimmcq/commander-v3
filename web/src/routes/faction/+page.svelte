@@ -602,25 +602,50 @@
 		{#if $factionState.intelCoverage || $factionState.tradeIntelCoverage}
 		<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
 			{#if $factionState.intelCoverage}
+				{@const ic = $factionState.intelCoverage}
+				{@const pct = ic.coveragePct ?? Math.round(ic.systemsSubmitted / Math.max(1, ic.totalSystems) * 100)}
 				<div class="card p-4">
-					<h2 class="text-sm font-semibold text-chrome-silver uppercase tracking-wider mb-2">System Intel Coverage</h2>
+					<div class="flex items-center justify-between mb-2">
+						<h2 class="text-sm font-semibold text-chrome-silver uppercase tracking-wider">System Intel</h2>
+						<span class="text-[10px] px-1.5 py-0.5 rounded bg-plasma-cyan/10 text-plasma-cyan border border-plasma-cyan/20">L{ic.intelLevel ?? 1}</span>
+					</div>
 					<div class="flex items-center gap-3">
 						<div class="flex-1 h-2 bg-hull-grey/20 rounded-full overflow-hidden">
-							<div class="h-full bg-plasma-cyan rounded-full" style="width:{Math.round($factionState.intelCoverage.systemsSubmitted / Math.max(1, $factionState.intelCoverage.totalSystems) * 100)}%"></div>
+							<div class="h-full bg-plasma-cyan rounded-full" style="width:{Math.min(100, pct)}%"></div>
 						</div>
-						<span class="mono text-xs text-chrome-silver">{$factionState.intelCoverage.systemsSubmitted}/{$factionState.intelCoverage.totalSystems}</span>
+						<span class="mono text-xs text-chrome-silver">{ic.systemsSubmitted} systems</span>
 					</div>
+					<p class="text-[10px] text-hull-grey mt-2">
+						{#if ic.systemsSubmitted === 0}
+							No system intel collected. <span class="text-warning-yellow">Upgrade to Intel Center (L2, 750K)</span> for auto-collection.
+						{:else}
+							{pct}% coverage · {ic.systemsSubmitted} systems known
+						{/if}
+					</p>
 				</div>
 			{/if}
 			{#if $factionState.tradeIntelCoverage}
+				{@const tic = $factionState.tradeIntelCoverage}
+				{@const tpct = tic.coveragePct ?? Math.round(tic.stationsSubmitted / Math.max(1, tic.totalStations) * 100)}
 				<div class="card p-4">
-					<h2 class="text-sm font-semibold text-chrome-silver uppercase tracking-wider mb-2">Trade Intel Coverage</h2>
+					<div class="flex items-center justify-between mb-2">
+						<h2 class="text-sm font-semibold text-chrome-silver uppercase tracking-wider">Trade Intel</h2>
+						<span class="text-[10px] px-1.5 py-0.5 rounded bg-bio-green/10 text-bio-green border border-bio-green/20">L{tic.intelLevel ?? 1}</span>
+					</div>
 					<div class="flex items-center gap-3">
 						<div class="flex-1 h-2 bg-hull-grey/20 rounded-full overflow-hidden">
-							<div class="h-full bg-bio-green rounded-full" style="width:{Math.round($factionState.tradeIntelCoverage.stationsSubmitted / Math.max(1, $factionState.tradeIntelCoverage.totalStations) * 100)}%"></div>
+							<div class="h-full bg-bio-green rounded-full" style="width:{Math.min(100, tpct)}%"></div>
 						</div>
-						<span class="mono text-xs text-chrome-silver">{$factionState.tradeIntelCoverage.stationsSubmitted}/{$factionState.tradeIntelCoverage.totalStations}</span>
+						<span class="mono text-xs text-chrome-silver">{tic.stationsSubmitted}/{tic.totalStations}</span>
 					</div>
+					<p class="text-[10px] text-hull-grey mt-2">
+						{tpct}% coverage
+						{#if tic.contributors}· {tic.contributors} contributors{/if}
+						{#if tic.topContributor}· top: <span class="text-plasma-cyan">{tic.topContributor}</span>{/if}
+					</p>
+					{#if (tic.intelLevel ?? 1) < 2}
+						<p class="text-[10px] text-warning-yellow mt-1">Upgrade to Commerce Terminal (L2, 1.5M) for auto-collection on every dock.</p>
+					{/if}
 				</div>
 			{/if}
 		</div>

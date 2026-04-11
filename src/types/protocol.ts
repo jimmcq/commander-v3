@@ -338,9 +338,21 @@ export interface FactionState {
   /** Current fleet storage mode */
   storageMode: string;
   /** Intel coverage status from faction intel submissions */
-  intelCoverage?: { systemsSubmitted: number; totalSystems: number } | null;
+  intelCoverage?: {
+    systemsSubmitted: number;
+    totalSystems: number;
+    coveragePct?: number;
+    intelLevel?: number;
+  } | null;
   /** Trade intel coverage status from faction trade intel submissions */
-  tradeIntelCoverage?: { stationsSubmitted: number; totalStations: number } | null;
+  tradeIntelCoverage?: {
+    stationsSubmitted: number;
+    totalStations: number;
+    coveragePct?: number;
+    intelLevel?: number;
+    contributors?: number;
+    topContributor?: string;
+  } | null;
   /** Active faction market orders (buy/sell from treasury) */
   orders?: Array<{
     id: string;

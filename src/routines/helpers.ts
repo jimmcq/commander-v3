@@ -315,8 +315,21 @@ export async function dockAtCurrent(ctx: BotContext): Promise<void> {
 
     // Submit intel to faction (if we have intel facilities)
     // Non-blocking, best-effort — feeds the shared intel database
+    // API requires: system_id + name (minimum). POIs optional but populate the map.
     try {
-      await ctx.api.factionSubmitIntel([{ system_id: ctx.player.currentSystem }]);
+      const sysId = ctx.player.currentSystem;
+      const sysData = ctx.galaxy.getSystem(sysId);
+      const sysName = sysData?.name ?? sysId.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+      const pois = (sysData?.pois ?? []).slice(0, 20).map(p => ({
+        id: p.id,
+        type: p.type ?? "unknown",
+        name: p.name ?? p.id,
+      }));
+      await ctx.api.factionSubmitIntel([{
+        system_id: sysId,
+        name: sysName,
+        pois,
+      }]);
     } catch { /* no intel facility or not in faction — ignore */ }
     try {
       await ctx.api.factionSubmitTradeIntel([{ base_id: ctx.player.dockedAtBase }]);

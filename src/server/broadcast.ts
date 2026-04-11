@@ -738,10 +738,22 @@ async function pollFactionState(deps: BroadcastDeps): Promise<void> {
       commanderAware: fleetConfig.defaultStorageMode === "faction_deposit",
       storageMode: fleetConfig.defaultStorageMode ?? "sell",
       intelCoverage: intelStatus
-        ? { systemsSubmitted: Number((intelStatus as Record<string, unknown>).systems_submitted ?? (intelStatus as Record<string, unknown>).systemsSubmitted ?? 0), totalSystems: Number((intelStatus as Record<string, unknown>).total_systems ?? (intelStatus as Record<string, unknown>).totalSystems ?? 0) }
+        ? {
+            systemsSubmitted: Number((intelStatus as Record<string, unknown>).systems_known ?? (intelStatus as Record<string, unknown>).systems_submitted ?? 0),
+            totalSystems: Number((intelStatus as Record<string, unknown>).pois_known ?? (intelStatus as Record<string, unknown>).total_systems ?? 0),
+            coveragePct: Number((intelStatus as Record<string, unknown>).coverage_pct ?? 0),
+            intelLevel: Number((intelStatus as Record<string, unknown>).intel_level ?? 1),
+          }
         : null,
       tradeIntelCoverage: tradeIntelStatus
-        ? { stationsSubmitted: Number((tradeIntelStatus as Record<string, unknown>).stations_submitted ?? (tradeIntelStatus as Record<string, unknown>).stationsSubmitted ?? 0), totalStations: Number((tradeIntelStatus as Record<string, unknown>).total_stations ?? (tradeIntelStatus as Record<string, unknown>).totalStations ?? 0) }
+        ? {
+            stationsSubmitted: Number((tradeIntelStatus as Record<string, unknown>).stations_known ?? (tradeIntelStatus as Record<string, unknown>).stations_submitted ?? 0),
+            totalStations: Number((tradeIntelStatus as Record<string, unknown>).total_stations ?? 0),
+            coveragePct: Number((tradeIntelStatus as Record<string, unknown>).coverage_pct ?? 0),
+            intelLevel: Number((tradeIntelStatus as Record<string, unknown>).intel_level ?? 1),
+            contributors: Number((tradeIntelStatus as Record<string, unknown>).contributors ?? 0),
+            topContributor: String((tradeIntelStatus as Record<string, unknown>).top_contributor ?? ""),
+          }
         : null,
       // Use cachedFactionOrders populated by pollOpenOrders (single source)
       orders: cachedFactionOrders.map(o => ({
