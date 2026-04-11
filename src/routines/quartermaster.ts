@@ -1380,7 +1380,18 @@ function identifyBuyOrderTargets(
   const ORE_TARGET_PCT = 0.05; // Buy up to 5% cap (5K units)
   const ORE_PRICE_FRACTION = 0.50;
 
+  // Items our miners produce — don't place buy orders for these (we'd be buying from
+  // ourselves, paying tax on the internal transfer). The order engine has standing
+  // mine orders for: iron, copper, silicon, titanium, gold, platinum, cobalt,
+  // palladium, aluminum, nickel, iridium.
+  const SELF_MINED_ORES = new Set([
+    "iron_ore", "copper_ore", "silicon_ore", "titanium_ore", "gold_ore",
+    "platinum_ore", "cobalt_ore", "palladium_ore", "aluminum_ore",
+    "nickel_ore", "iridium_ore",
+  ]);
+
   for (const [oreId, recipeMargin] of oreRecipeMargins) {
+    if (SELF_MINED_ORES.has(oreId)) continue; // Don't buy from ourselves
     const stock = factionStock.get(oreId) ?? 0;
     const fillPct = stock / STORAGE_CAP;
     if (fillPct >= ORE_LOW_PCT) continue; // Miners keeping up or storage has enough
