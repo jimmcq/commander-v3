@@ -1,348 +1,390 @@
 <script lang="ts">
 	import { bots, galaxySystems } from "$stores/websocket";
-	import GalaxyMap from "$lib/components/GalaxyMap.svelte";
 	import type { GalaxySystemSummary } from "../../../../src/types/protocol";
 
-	let activeFilters = $state<Set<string>>(new Set(["bots", "intel-freshness"]));
+	// ── Sort + filter state ──
+	type SortKey = "name" | "empire" | "jumps" | "pois" | "bots" | "intel" | "resources";
+	let sortKey = $state<SortKey>("bots");
+	let sortDir = $state<"asc" | "desc">("desc");
+	let search = $state("");
+	let empireFilter = $state("all");
+	let resourceFilter = $state("all");
+	let presenceFilter = $state<"all" | "with_bots" | "no_bots" | "stale_intel" | "unscanned">("all");
+	let expanded = $state<Set<string>>(new Set());
 
-	const filterOptions = [
-		{ id: "bots", label: "Bots", color: "#00d4ff", icon: "👤" },
-		{ id: "intel-freshness", label: "Intel Freshness", color: "#2dd4bf", icon: "📡" },
-		{ id: "resources", label: "Resources", color: "#ff6b35", icon: "⛏️" },
-		{ id: "trade", label: "Trade", color: "#ffd700", icon: "💰" },
-		{ id: "threats", label: "Threats", color: "#e63946", icon: "⚠️" },
-		{ id: "orders", label: "Orders", color: "#9b59b6", icon: "🎯" },
-		{ id: "facilities", label: "Facilities", color: "#2dd4bf", icon: "🏭" },
-		{ id: "factions", label: "Empires", color: "#ffd700", icon: "🏛️" },
-	];
+	function toggleSort(k: SortKey) {
+		if (sortKey === k) sortDir = sortDir === "asc" ? "desc" : "asc";
+		else { sortKey = k; sortDir = "desc"; }
+	}
+	function toggleExpand(id: string) {
+		const next = new Set(expanded);
+		if (next.has(id)) next.delete(id);
+		else next.add(id);
+		expanded = next;
+	}
 
-	// Resource sub-filter
-	let selectedResources = $state<Set<string>>(new Set());
-	const allResources = $derived((() => {
-		const resources = new Set<string>();
-		for (const sys of $galaxySystems) {
-			for (const poi of sys.pois ?? []) {
-				for (const res of poi.resources ?? []) {
-					resources.add(res.resourceId);
+	// ── Derived data ──
+	const HOME_SYSTEM = "sol";
+
+	// BFS shortest path in jumps from sol
+	const jumpsFromSol = $derived.by(() => {
+		const map = new Map<string, number>();
+		map.set(HOME_SYSTEM, 0);
+		const queue: string[] = [HOME_SYSTEM];
+		const sysById = new Map($galaxySystems.map(s => [s.id, s]));
+		while (queue.length > 0) {
+			const id = queue.shift()!;
+			const dist = map.get(id)!;
+			const sys = sysById.get(id);
+			if (!sys) continue;
+			for (const conn of sys.connections ?? []) {
+				if (!map.has(conn)) {
+					map.set(conn, dist + 1);
+					queue.push(conn);
 				}
 			}
 		}
-		return [...resources].sort();
-	})());
+		return map;
+	});
 
-	function toggleFilter(id: string) {
-		activeFilters = new Set(activeFilters);
-		if (activeFilters.has(id)) activeFilters.delete(id);
-		else activeFilters.add(id);
-	}
+	const botsBySystem = $derived.by(() => {
+		const m = new Map<string, typeof $bots>();
+		for (const b of $bots) {
+			if (!b.systemId) continue;
+			if (!m.has(b.systemId)) m.set(b.systemId, []);
+			m.get(b.systemId)!.push(b);
+		}
+		return m;
+	});
 
-	function toggleResource(resId: string) {
-		selectedResources = new Set(selectedResources);
-		if (selectedResources.has(resId)) selectedResources.delete(resId);
-		else selectedResources.add(resId);
-	}
-
-	function handleSelectBot(botId: string) {
-		window.location.href = `/bots/${botId}`;
-	}
-
-	// Pass full system data (including POIs with scannedAt) to GalaxyMap
-	const mapSystems = $derived(
-		$galaxySystems.map((s) => ({
-			id: s.id,
-			name: s.name,
-			x: s.x,
-			y: s.y,
-			empire: s.empire,
-			policeLevel: s.policeLevel,
-			connections: s.connections,
-			poiCount: s.poiCount,
-			visited: s.visited,
-			pois: s.pois ?? [],
-		}))
-	);
-
-	// System detail panel state
-	let selectedSystem = $state<string | null>(null);
-	const selectedSys = $derived($galaxySystems.find((s: GalaxySystemSummary) => s.id === selectedSystem));
-	const botsInSystem = $derived($bots.filter((b) => b.systemId === selectedSystem));
-
-	function handleSelectSystem(systemId: string) {
-		selectedSystem = selectedSystem === systemId ? null : systemId;
-	}
-
-	// Compute intel freshness for selected system
-	function getIntelAge(sys: GalaxySystemSummary | undefined): { label: string; color: string; ageMs: number } {
-		if (!sys) return { label: "Unknown", color: "#5a6a7a", ageMs: Infinity };
+	function intelAge(sys: GalaxySystemSummary): { ms: number; label: string; color: string } {
 		const scans = (sys.pois ?? []).map(p => p.scannedAt ?? 0).filter(t => t > 0);
-		if (scans.length === 0) return { label: "Never scanned", color: "#5a6a7a", ageMs: Infinity };
+		if (scans.length === 0) return { ms: Infinity, label: "Never", color: "text-hull-grey" };
 		const newest = Math.max(...scans);
-		const ageMs = Date.now() - newest;
-		const ageMin = Math.round(ageMs / 60_000);
-		if (ageMin < 10) return { label: `${ageMin}m ago`, color: "#2dd4bf", ageMs };
-		if (ageMin < 30) return { label: `${ageMin}m ago`, color: "#ffd93d", ageMs };
-		if (ageMin < 120) return { label: `${ageMin}m ago`, color: "#ff6b35", ageMs };
-		return { label: `${Math.round(ageMin / 60)}h ago`, color: "#e63946", ageMs };
+		const ms = Date.now() - newest;
+		if (ms < 5 * 60 * 1000) return { ms, label: "Live", color: "text-bio-green" };
+		if (ms < 60 * 60 * 1000) return { ms, label: `${Math.round(ms / 60000)}m`, color: "text-plasma-cyan" };
+		if (ms < 24 * 60 * 60 * 1000) return { ms, label: `${Math.round(ms / 3600000)}h`, color: "text-warning-yellow" };
+		return { ms, label: `${Math.round(ms / 86400000)}d`, color: "text-claw-red" };
 	}
 
-	const selectedIntel = $derived(getIntelAge(selectedSys));
+	function topResources(sys: GalaxySystemSummary): string[] {
+		const counts = new Map<string, number>();
+		for (const poi of sys.pois ?? []) {
+			for (const r of poi.resources ?? []) {
+				counts.set(r.resourceId, (counts.get(r.resourceId) ?? 0) + (r.remaining ?? 0));
+			}
+		}
+		return [...counts.entries()]
+			.sort((a, b) => b[1] - a[1])
+			.slice(0, 5)
+			.map(([id]) => id);
+	}
+
+	function poiTypeCounts(sys: GalaxySystemSummary): Map<string, number> {
+		const m = new Map<string, number>();
+		for (const p of sys.pois ?? []) {
+			m.set(p.type, (m.get(p.type) ?? 0) + 1);
+		}
+		return m;
+	}
+
+	const allEmpires = $derived([...new Set($galaxySystems.map(s => s.empire).filter(Boolean))].sort());
+	const allResources = $derived.by(() => {
+		const r = new Set<string>();
+		for (const sys of $galaxySystems) for (const poi of sys.pois ?? []) for (const res of poi.resources ?? []) r.add(res.resourceId);
+		return [...r].sort();
+	});
+
+	const enrichedSystems = $derived.by(() => {
+		return $galaxySystems.map(sys => {
+			const botsHere = botsBySystem.get(sys.id) ?? [];
+			const intel = intelAge(sys);
+			const resources = topResources(sys);
+			const jumps = jumpsFromSol.get(sys.id) ?? -1;
+			return { sys, botsHere, intel, resources, jumps };
+		});
+	});
+
+	const filteredSorted = $derived.by(() => {
+		let list = enrichedSystems;
+		// Search
+		if (search.trim()) {
+			const q = search.toLowerCase();
+			list = list.filter(({ sys, resources }) =>
+				sys.name.toLowerCase().includes(q) ||
+				sys.id.toLowerCase().includes(q) ||
+				resources.some(r => r.includes(q))
+			);
+		}
+		// Empire filter
+		if (empireFilter !== "all") list = list.filter(({ sys }) => sys.empire === empireFilter);
+		// Resource filter
+		if (resourceFilter !== "all") list = list.filter(({ sys }) =>
+			(sys.pois ?? []).some(p => (p.resources ?? []).some(r => r.resourceId === resourceFilter))
+		);
+		// Presence filter
+		if (presenceFilter === "with_bots") list = list.filter(e => e.botsHere.length > 0);
+		else if (presenceFilter === "no_bots") list = list.filter(e => e.botsHere.length === 0);
+		else if (presenceFilter === "stale_intel") list = list.filter(e => e.intel.ms > 60 * 60 * 1000 && e.intel.ms !== Infinity);
+		else if (presenceFilter === "unscanned") list = list.filter(e => e.intel.ms === Infinity);
+		// Sort
+		const dir = sortDir === "asc" ? 1 : -1;
+		list = [...list].sort((a, b) => {
+			let av: number | string = 0, bv: number | string = 0;
+			switch (sortKey) {
+				case "name": av = a.sys.name.toLowerCase(); bv = b.sys.name.toLowerCase(); break;
+				case "empire": av = a.sys.empire; bv = b.sys.empire; break;
+				case "jumps": av = a.jumps < 0 ? 9999 : a.jumps; bv = b.jumps < 0 ? 9999 : b.jumps; break;
+				case "pois": av = a.sys.pois?.length ?? 0; bv = b.sys.pois?.length ?? 0; break;
+				case "bots": av = a.botsHere.length; bv = b.botsHere.length; break;
+				case "intel": av = a.intel.ms === Infinity ? Number.MAX_SAFE_INTEGER : a.intel.ms; bv = b.intel.ms === Infinity ? Number.MAX_SAFE_INTEGER : b.intel.ms; break;
+				case "resources": av = a.resources.length; bv = b.resources.length; break;
+			}
+			if (typeof av === "string") return dir * (av as string).localeCompare(bv as string);
+			return dir * ((av as number) - (bv as number));
+		});
+		return list;
+	});
+
+	function arrow(k: SortKey): string {
+		if (sortKey !== k) return "";
+		return sortDir === "desc" ? " ↓" : " ↑";
+	}
+
+	function formatRichness(n: number): string {
+		if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+		if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+		return String(n);
+	}
+
+	function formatTime(ts: number): string {
+		if (!ts) return "never";
+		return new Date(ts).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+	}
+
+	function poiTypeIcon(type: string): string {
+		const t = type.toLowerCase();
+		if (t.includes("station") || t.includes("base") || t.includes("outpost")) return "🏛";
+		if (t.includes("belt") || t.includes("asteroid") || t.includes("vein")) return "⛏";
+		if (t.includes("ice")) return "🧊";
+		if (t.includes("gas") || t.includes("nebula") || t.includes("cloud")) return "💨";
+		if (t.includes("wreck") || t.includes("debris") || t.includes("scrap")) return "💀";
+		if (t.includes("planet")) return "🪐";
+		if (t.includes("star") || t.includes("sun")) return "☀";
+		if (t.includes("anomaly")) return "❓";
+		return "📍";
+	}
 </script>
 
-<svelte:head>
-	<title>Galaxy Map - SpaceMolt Commander</title>
-</svelte:head>
+<svelte:head><title>Systems - SpaceMolt Commander</title></svelte:head>
 
-<div class="space-y-3">
+<div class="space-y-4">
 	<div class="flex items-center justify-between">
-		<h1 class="text-2xl font-bold text-star-white">Galaxy Map</h1>
-		<span class="text-sm text-chrome-silver">{mapSystems.length} systems | {$bots.length} bots</span>
-	</div>
-
-	<!-- Filter bar -->
-	<div class="card p-2.5">
-		<div class="flex flex-wrap gap-1.5">
-			{#each filterOptions as filter}
-				<button
-					class="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-all
-						{activeFilters.has(filter.id)
-						? 'bg-nebula-blue/80 text-star-white border border-hull-grey/50'
-						: 'text-hull-grey border border-hull-grey/20 hover:border-hull-grey/50 hover:text-chrome-silver'}"
-					onclick={() => toggleFilter(filter.id)}
-				>
-					<span class="text-[10px]">{filter.icon}</span>
-					{filter.label}
-				</button>
-			{/each}
+		<h1 class="text-2xl font-bold text-star-white">Systems Browser</h1>
+		<div class="text-xs text-hull-grey">
+			{filteredSorted.length} / {$galaxySystems.length} systems · {$bots.length} bots
 		</div>
-
-		<!-- Resource sub-filter (shown when Resources filter is active) -->
-		{#if activeFilters.has("resources") && allResources.length > 0}
-			<div class="mt-2 pt-2 border-t border-hull-grey/10">
-				<div class="flex flex-wrap gap-1">
-					{#each allResources.slice(0, 20) as res}
-						<button
-							class="px-2 py-0.5 rounded text-[10px] transition-all
-								{selectedResources.has(res)
-								? 'bg-shell-orange/30 text-shell-orange border border-shell-orange/50'
-								: 'text-hull-grey border border-hull-grey/15 hover:border-hull-grey/40'}"
-							onclick={() => toggleResource(res)}
-						>
-							{res.replace(/_/g, " ")}
-						</button>
-					{/each}
-				</div>
-			</div>
-		{/if}
 	</div>
 
-	<!-- Legend for active filters -->
-	{#if activeFilters.size > 0}
-	<div class="card p-2.5 flex flex-wrap gap-x-6 gap-y-1 text-[10px]">
-		{#if activeFilters.has("intel-freshness")}
-			<div class="flex items-center gap-1.5">
-				<span class="font-medium text-chrome-silver mr-1">Intel:</span>
-				<span class="w-2 h-2 rounded-full" style="background: #2dd4bf"></span><span class="text-hull-grey">&lt;10m</span>
-				<span class="w-2 h-2 rounded-full" style="background: #ffd93d"></span><span class="text-hull-grey">10-30m</span>
-				<span class="w-2 h-2 rounded-full" style="background: #ff6b35"></span><span class="text-hull-grey">30m-2h</span>
-				<span class="w-2 h-2 rounded-full" style="background: #e63946"></span><span class="text-hull-grey">&gt;2h</span>
-				<span class="w-2 h-2 rounded-full" style="background: #3a3a4a"></span><span class="text-hull-grey">never</span>
-			</div>
-		{/if}
-		{#if activeFilters.has("bots")}
-			<div class="flex items-center gap-1.5">
-				<span class="font-medium text-chrome-silver mr-1">Bots:</span>
-				<span class="w-2 h-2 rotate-45" style="background: #ff6b35"></span><span class="text-hull-grey">miner</span>
-				<span class="w-2 h-2 rotate-45" style="background: #2dd4bf"></span><span class="text-hull-grey">trader</span>
-				<span class="w-2 h-2 rotate-45" style="background: #00d4ff"></span><span class="text-hull-grey">explorer</span>
-				<span class="w-2 h-2 rotate-45" style="background: #9b59b6"></span><span class="text-hull-grey">crafter</span>
-				<span class="w-2 h-2 rotate-45" style="background: #e63946"></span><span class="text-hull-grey">hunter</span>
-				<span class="w-2 h-2 rotate-45" style="background: #ffd700"></span><span class="text-hull-grey">mission</span>
-				<span class="text-hull-grey ml-1">--- route</span>
-			</div>
-		{/if}
-		{#if activeFilters.has("threats")}
-			<div class="flex items-center gap-1.5">
-				<span class="font-medium text-chrome-silver mr-1">Security:</span>
-				<span class="w-2 h-2 rounded-full" style="background: #e63946"></span><span class="text-hull-grey">none</span>
-				<span class="w-2 h-2 rounded-full" style="background: #ffd93d"></span><span class="text-hull-grey">low</span>
-				<span class="w-2 h-2 rounded-full" style="background: #2dd4bf"></span><span class="text-hull-grey">high</span>
-			</div>
-		{/if}
-		{#if activeFilters.has("resources") && selectedResources.size > 0}
-			<div class="flex items-center gap-1.5">
-				<span class="font-medium text-chrome-silver mr-1">Resources:</span>
-				<span class="w-3 h-3 rounded-full border-2" style="border-color: #ff6b35"></span><span class="text-hull-grey">ring = has resource (thicker = richer)</span>
-			</div>
-		{/if}
-		{#if activeFilters.has("factions")}
-			<div class="flex items-center gap-1.5">
-				<span class="font-medium text-chrome-silver mr-1">Empires:</span>
-				<span class="w-2 h-2 rounded-full" style="background: #ffd700"></span><span class="text-hull-grey">solarian</span>
-				<span class="w-2 h-2 rounded-full" style="background: #9b59b6"></span><span class="text-hull-grey">voidborn</span>
-				<span class="w-2 h-2 rounded-full" style="background: #e63946"></span><span class="text-hull-grey">crimson</span>
-				<span class="w-2 h-2 rounded-full" style="background: #00d4ff"></span><span class="text-hull-grey">nebula</span>
-				<span class="w-2 h-2 rounded-full" style="background: #2dd4bf"></span><span class="text-hull-grey">outerrim</span>
-			</div>
-		{/if}
-	</div>
-	{/if}
-
-	<!-- Canvas map + side panel -->
-	<div class="flex gap-4">
-		<div class="card p-0 overflow-hidden flex-1">
-			<div class="h-[calc(100vh-260px)] min-h-[400px]">
-				<GalaxyMap
-					systems={mapSystems}
-					bots={$bots}
-					{activeFilters}
-					{selectedResources}
-					onSelectSystem={handleSelectSystem}
-					onSelectBot={handleSelectBot}
-				/>
-			</div>
-		</div>
-
-		<!-- Enhanced system detail panel -->
-		{#if selectedSys}
-			<div class="card p-4 w-[380px] shrink-0 space-y-4 self-start max-h-[calc(100vh-260px)] overflow-y-auto">
-				<!-- Header -->
-				<div class="flex items-center justify-between">
-					<div>
-						<h3 class="text-lg font-semibold text-star-white">{selectedSys.name}</h3>
-						<span class="text-xs capitalize text-hull-grey">{selectedSys.empire || "neutral"} space</span>
-					</div>
+	<!-- Filters -->
+	<div class="card p-3 space-y-2">
+		<div class="flex flex-wrap gap-2 items-center">
+			<input
+				type="text"
+				bind:value={search}
+				placeholder="Search system, id, or resource…"
+				class="bg-deep-void border border-hull-grey/30 rounded px-3 py-1.5 text-sm text-star-white placeholder:text-hull-grey w-64 focus:outline-none focus:border-plasma-cyan"
+			/>
+			<select bind:value={empireFilter} class="bg-deep-void border border-hull-grey/30 rounded px-2 py-1.5 text-xs text-star-white">
+				<option value="all">All Empires</option>
+				{#each allEmpires as e}<option value={e}>{e}</option>{/each}
+			</select>
+			<select bind:value={resourceFilter} class="bg-deep-void border border-hull-grey/30 rounded px-2 py-1.5 text-xs text-star-white max-w-[180px]">
+				<option value="all">Any Resource</option>
+				{#each allResources as r}<option value={r}>{r.replace(/_/g, " ")}</option>{/each}
+			</select>
+			<div class="flex gap-1 bg-deep-void rounded p-0.5 border border-hull-grey/30">
+				{#each [["all","All"],["with_bots","With Bots"],["no_bots","No Bots"],["stale_intel","Stale Intel"],["unscanned","Unscanned"]] as [val,lbl]}
 					<button
-						class="text-hull-grey hover:text-star-white text-lg leading-none"
-						onclick={() => (selectedSystem = null)}
-					>&times;</button>
-				</div>
-
-				<!-- Intel freshness badge -->
-				<div class="flex items-center gap-2 px-3 py-2 rounded-lg bg-deep-void/50">
-					<span class="text-sm">📡</span>
-					<div class="flex-1">
-						<div class="text-xs text-chrome-silver">Intel Status</div>
-						<div class="text-sm font-medium" style="color: {selectedIntel.color}">{selectedIntel.label}</div>
-					</div>
-					<div class="flex items-center gap-1.5">
-						<span class="text-xs text-hull-grey">Police</span>
-						<span class="text-xs font-mono text-star-white">{selectedSys.policeLevel}</span>
-					</div>
-				</div>
-
-				<!-- Stats row -->
-				<div class="grid grid-cols-3 gap-2 text-center">
-					<div class="bg-deep-void/30 rounded-lg p-2">
-						<div class="text-lg font-bold text-star-white">{selectedSys.pois.length || selectedSys.poiCount}</div>
-						<div class="text-[10px] text-hull-grey">POIs</div>
-					</div>
-					<div class="bg-deep-void/30 rounded-lg p-2">
-						<div class="text-lg font-bold text-star-white">{selectedSys.connections.length}</div>
-						<div class="text-[10px] text-hull-grey">Jumps</div>
-					</div>
-					<div class="bg-deep-void/30 rounded-lg p-2">
-						<div class="text-lg font-bold text-plasma-cyan">{botsInSystem.length}</div>
-						<div class="text-[10px] text-hull-grey">Bots</div>
-					</div>
-				</div>
-
-				<!-- POIs -->
-				<div>
-					<h4 class="text-xs text-chrome-silver uppercase tracking-wider mb-2">Points of Interest</h4>
-					{#if selectedSys.pois.length === 0}
-						<p class="text-xs text-hull-grey">
-							{selectedSys.poiCount > 0
-								? `${selectedSys.poiCount} POI(s) — send a bot to scan`
-								: "No data yet"}
-						</p>
-					{:else}
-						<div class="space-y-1.5">
-							{#each selectedSys.pois as poi}
-								{@const scanAge = poi.scannedAt ? Math.round((Date.now() - poi.scannedAt) / 60_000) : -1}
-								<div class="py-1.5 px-2 rounded bg-deep-void/30">
-									<div class="flex items-center gap-2 text-xs">
-										<span class="w-2 h-2 rounded-full shrink-0
-											{poi.hasBase ? 'bg-bio-green' :
-											 poi.type.includes('asteroid') ? 'bg-shell-orange' :
-											 poi.type.includes('gas') || poi.type.includes('nebula') ? 'bg-void-purple' :
-											 poi.type.includes('ice') ? 'bg-plasma-cyan' : 'bg-hull-grey'}"></span>
-										<span class="text-star-white flex-1 truncate">{poi.name}</span>
-										{#if poi.hasBase}
-											<span class="text-bio-green text-[9px] bg-bio-green/10 px-1 rounded">Station</span>
-										{/if}
-										{#if scanAge >= 0}
-											<span class="text-[9px] {scanAge < 10 ? 'text-bio-green' : scanAge < 30 ? 'text-warning-yellow' : 'text-hull-grey'}">{scanAge}m</span>
-										{/if}
-									</div>
-									{#if poi.resources && poi.resources.length > 0}
-										<div class="ml-4 mt-1 space-y-0.5">
-											{#each poi.resources as res}
-												<div class="flex items-center justify-between text-[10px]">
-													<span class="text-shell-orange capitalize">{res.resourceId.replace(/_/g, " ")}</span>
-													<span class="flex items-center gap-2">
-														<span class="text-chrome-silver">{(res.richness * 100).toFixed(0)}%</span>
-														{#if res.remaining > 0}
-															<span class="text-bio-green">{res.remaining.toLocaleString()}</span>
-														{:else}
-															<span class="text-claw-red">depleted</span>
-														{/if}
-													</span>
-												</div>
-											{/each}
-										</div>
-									{/if}
-								</div>
-							{/each}
-						</div>
-					{/if}
-				</div>
-
-				<!-- Bots -->
-				<div>
-					<h4 class="text-xs text-chrome-silver uppercase tracking-wider mb-2">Bots ({botsInSystem.length})</h4>
-					{#if botsInSystem.length === 0}
-						<p class="text-xs text-hull-grey">No bots in system</p>
-					{:else}
-						<div class="space-y-1.5">
-							{#each botsInSystem as bot}
-								<a href="/bots/{bot.id}" class="flex items-center gap-2 text-xs py-1.5 px-2 rounded bg-deep-void/30 hover:bg-deep-void/60 transition-colors">
-									<span class="w-2 h-2 rounded-full shrink-0
-										{bot.status === 'running' ? 'bg-bio-green' : 'bg-hull-grey'}"></span>
-									<span class="text-star-white flex-1">{bot.username}</span>
-									{#if bot.routine}
-										<span class="text-[10px] text-plasma-cyan">{bot.routine}</span>
-									{/if}
-									<div class="flex gap-1.5 text-[9px]">
-										<span class="text-hull-grey" title="Fuel">{bot.fuelPct ?? 0}%</span>
-										<span class="text-hull-grey" title="Cargo">{bot.cargoPct ?? 0}%</span>
-									</div>
-								</a>
-							{/each}
-						</div>
-					{/if}
-				</div>
-
-				<!-- Connections -->
-				<div>
-					<h4 class="text-xs text-chrome-silver uppercase tracking-wider mb-2">Jump Connections</h4>
-					<div class="space-y-1">
-						{#each selectedSys.connections as connId}
-							{@const connSys = $galaxySystems.find(s => s.id === connId)}
-							{@const connIntel = getIntelAge(connSys)}
-							<button
-								class="flex items-center justify-between w-full text-xs py-1 px-2 rounded hover:bg-deep-void/30 transition-colors text-left"
-								onclick={() => handleSelectSystem(connId)}
-							>
-								<span class="text-star-white">{connSys?.name ?? connId}</span>
-								<div class="flex items-center gap-2">
-									<span class="w-1.5 h-1.5 rounded-full" style="background: {connIntel.color}"></span>
-									<span class="text-hull-grey capitalize">{connSys?.empire ?? "?"}</span>
-								</div>
-							</button>
-						{/each}
-					</div>
-				</div>
+						class="px-2 py-1 text-[10px] rounded transition-colors {presenceFilter === val ? 'bg-plasma-cyan/20 text-plasma-cyan' : 'text-hull-grey hover:text-star-white'}"
+						onclick={() => presenceFilter = val as typeof presenceFilter}
+					>{lbl}</button>
+				{/each}
 			</div>
-		{/if}
+			{#if search || empireFilter !== "all" || resourceFilter !== "all" || presenceFilter !== "all"}
+				<button
+					class="text-[10px] px-2 py-1 rounded text-hull-grey hover:text-claw-red"
+					onclick={() => { search = ""; empireFilter = "all"; resourceFilter = "all"; presenceFilter = "all"; }}
+				>Clear</button>
+			{/if}
+		</div>
+	</div>
+
+	<!-- Systems Table -->
+	<div class="card overflow-hidden">
+		<div class="overflow-x-auto max-h-[calc(100vh-280px)] overflow-y-auto">
+			<table class="w-full text-xs">
+				<thead class="sticky top-0 bg-deep-void z-10 border-b border-hull-grey/30">
+					<tr class="text-left text-chrome-silver uppercase tracking-wider">
+						<th class="py-2 pl-3 pr-2 w-6"></th>
+						<th class="py-2 pr-3 cursor-pointer hover:text-plasma-cyan select-none" onclick={() => toggleSort("name")}>System{arrow("name")}</th>
+						<th class="py-2 pr-3 cursor-pointer hover:text-plasma-cyan select-none" onclick={() => toggleSort("empire")}>Empire{arrow("empire")}</th>
+						<th class="py-2 pr-3 text-center cursor-pointer hover:text-plasma-cyan select-none" onclick={() => toggleSort("jumps")}>Jumps{arrow("jumps")}</th>
+						<th class="py-2 pr-3 text-center cursor-pointer hover:text-plasma-cyan select-none" onclick={() => toggleSort("pois")}>POIs{arrow("pois")}</th>
+						<th class="py-2 pr-3 text-center cursor-pointer hover:text-plasma-cyan select-none" onclick={() => toggleSort("bots")}>Bots{arrow("bots")}</th>
+						<th class="py-2 pr-3 cursor-pointer hover:text-plasma-cyan select-none" onclick={() => toggleSort("intel")}>Intel{arrow("intel")}</th>
+						<th class="py-2 pr-3">Top Resources</th>
+					</tr>
+				</thead>
+				<tbody class="divide-y divide-hull-grey/10">
+					{#each filteredSorted as { sys, botsHere, intel, resources, jumps } (sys.id)}
+						<tr
+							class="hover:bg-nebula-blue/10 cursor-pointer transition-colors"
+							onclick={() => toggleExpand(sys.id)}
+						>
+							<td class="py-1.5 pl-3 pr-2 text-hull-grey">{expanded.has(sys.id) ? "▼" : "▶"}</td>
+							<td class="py-1.5 pr-3">
+								<div class="flex items-center gap-2">
+									<span class="text-star-white font-medium">{sys.name}</span>
+									{#if !sys.visited}<span class="text-[9px] text-hull-grey">unvisited</span>{/if}
+								</div>
+							</td>
+							<td class="py-1.5 pr-3 text-chrome-silver capitalize">{sys.empire || "—"}</td>
+							<td class="py-1.5 pr-3 text-center mono">
+								{#if jumps < 0}
+									<span class="text-hull-grey">∞</span>
+								{:else if jumps === 0}
+									<span class="text-warning-yellow font-bold">★</span>
+								{:else}
+									<span class="text-chrome-silver">{jumps}</span>
+								{/if}
+							</td>
+							<td class="py-1.5 pr-3 text-center mono text-chrome-silver">{sys.pois?.length ?? sys.poiCount ?? 0}</td>
+							<td class="py-1.5 pr-3 text-center mono">
+								{#if botsHere.length > 0}
+									<span class="text-bio-green font-bold">{botsHere.length}</span>
+								{:else}
+									<span class="text-hull-grey">·</span>
+								{/if}
+							</td>
+							<td class="py-1.5 pr-3"><span class={intel.color}>{intel.label}</span></td>
+							<td class="py-1.5 pr-3">
+								{#if resources.length === 0}
+									<span class="text-hull-grey">—</span>
+								{:else}
+									<div class="flex flex-wrap gap-1">
+										{#each resources.slice(0, 4) as r}
+											<span class="text-[9px] px-1 py-0.5 rounded bg-shell-orange/10 text-shell-orange">{r.replace(/_/g, " ")}</span>
+										{/each}
+										{#if resources.length > 4}<span class="text-[9px] text-hull-grey">+{resources.length - 4}</span>{/if}
+									</div>
+								{/if}
+							</td>
+						</tr>
+
+						{#if expanded.has(sys.id)}
+							<tr class="bg-deep-void/50">
+								<td colspan="8" class="px-6 py-3">
+									<div class="space-y-3">
+										<!-- System metadata -->
+										<div class="flex flex-wrap gap-x-6 gap-y-1 text-[11px]">
+											<div><span class="text-hull-grey">ID:</span> <span class="text-chrome-silver mono">{sys.id}</span></div>
+											<div><span class="text-hull-grey">Police:</span> <span class="text-chrome-silver">L{sys.policeLevel ?? 0}</span></div>
+											<div><span class="text-hull-grey">Connections:</span> <span class="text-chrome-silver">{sys.connections?.length ?? 0}</span></div>
+											<div><span class="text-hull-grey">POIs:</span> <span class="text-chrome-silver">{sys.pois?.length ?? 0}</span></div>
+											<div><span class="text-hull-grey">Visited:</span> <span class={sys.visited ? 'text-bio-green' : 'text-claw-red'}>{sys.visited ? 'yes' : 'no'}</span></div>
+										</div>
+
+										<!-- Bots in system -->
+										{#if botsHere.length > 0}
+											<div>
+												<div class="text-[10px] text-chrome-silver uppercase mb-1">Bots Here ({botsHere.length})</div>
+												<div class="flex flex-wrap gap-1">
+													{#each botsHere as b}
+														<a href="/bots/{b.id}" class="text-[10px] px-2 py-0.5 rounded bg-plasma-cyan/10 text-plasma-cyan border border-plasma-cyan/30 hover:bg-plasma-cyan/20">{b.username}</a>
+													{/each}
+												</div>
+											</div>
+										{/if}
+
+										<!-- Connections -->
+										{#if sys.connections && sys.connections.length > 0}
+											<div>
+												<div class="text-[10px] text-chrome-silver uppercase mb-1">Connected Systems</div>
+												<div class="flex flex-wrap gap-1">
+													{#each sys.connections as connId}
+														{@const target = $galaxySystems.find(s => s.id === connId)}
+														<span class="text-[10px] px-2 py-0.5 rounded bg-nebula-blue/30 text-chrome-silver">{target?.name ?? connId}</span>
+													{/each}
+												</div>
+											</div>
+										{/if}
+
+										<!-- POIs -->
+										{#if sys.pois && sys.pois.length > 0}
+											<div>
+												<div class="text-[10px] text-chrome-silver uppercase mb-1">Points of Interest ({sys.pois.length})</div>
+												<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
+													{#each sys.pois as poi}
+														<div class="rounded border border-hull-grey/20 bg-deep-void/70 p-2">
+															<div class="flex items-start justify-between gap-2 mb-1">
+																<div class="flex-1 min-w-0">
+																	<div class="flex items-center gap-1.5">
+																		<span>{poiTypeIcon(poi.type)}</span>
+																		<span class="text-[11px] text-star-white font-medium truncate" title={poi.name}>{poi.name}</span>
+																	</div>
+																	<div class="text-[9px] text-hull-grey mt-0.5">{poi.type.replace(/_/g, " ")}</div>
+																</div>
+																{#if poi.hasBase}
+																	<span class="text-[9px] px-1.5 py-0.5 rounded bg-bio-green/10 text-bio-green border border-bio-green/30 shrink-0">DOCK</span>
+																{/if}
+															</div>
+															{#if poi.baseName}
+																<div class="text-[10px] text-plasma-cyan mt-1">📍 {poi.baseName}</div>
+															{/if}
+															{#if poi.resources && poi.resources.length > 0}
+																<div class="mt-1.5 space-y-0.5">
+																	{#each poi.resources.sort((a, b) => (b.remaining ?? 0) - (a.remaining ?? 0)) as r}
+																		<div class="flex items-center justify-between gap-2 text-[10px]">
+																			<span class="text-chrome-silver truncate">{r.resourceId.replace(/_/g, " ")}</span>
+																			<div class="flex items-center gap-1 shrink-0">
+																				{#if r.richness > 0}
+																					<span class="text-shell-orange" title="Richness">★{r.richness}</span>
+																				{:else}
+																					<span class="text-hull-grey" title="Depleted">depl</span>
+																				{/if}
+																				<span class="mono text-bio-green/80">{formatRichness(r.remaining ?? 0)}</span>
+																			</div>
+																		</div>
+																	{/each}
+																</div>
+															{/if}
+															{#if poi.scannedAt}
+																<div class="text-[9px] text-hull-grey mt-1.5 pt-1 border-t border-hull-grey/10">
+																	scanned {formatTime(poi.scannedAt)}
+																</div>
+															{:else}
+																<div class="text-[9px] text-hull-grey mt-1.5 pt-1 border-t border-hull-grey/10 italic">
+																	never scanned
+																</div>
+															{/if}
+														</div>
+													{/each}
+												</div>
+											</div>
+										{:else if !sys.visited}
+											<div class="text-[11px] text-hull-grey italic">No POI data — system not yet visited.</div>
+										{/if}
+									</div>
+								</td>
+							</tr>
+						{/if}
+					{:else}
+						<tr><td colspan="8" class="text-center py-8 text-hull-grey">No systems match the current filters.</td></tr>
+					{/each}
+				</tbody>
+			</table>
+		</div>
 	</div>
 </div>

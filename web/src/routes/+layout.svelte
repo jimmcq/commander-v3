@@ -52,7 +52,7 @@
 		{ href: "/", label: "Fleet", key: "1" },
 		{ href: "/bots", label: "Bots", key: "2" },
 		{ href: "/commander", label: "Orders", key: "3" },
-		{ href: "/galaxy", label: "Map", key: "4" },
+		{ href: "/galaxy", label: "Systems", key: "4" },
 		{ href: "/economy", label: "Economy", key: "5" },
 		{ href: "/accounting", label: "Accounting", key: "6" },
 		{ href: "/faction", label: "Faction", key: "7" },
