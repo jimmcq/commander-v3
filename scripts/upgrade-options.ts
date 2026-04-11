@@ -55,7 +55,6 @@ async function main() {
 	async function processBot(bot: any): Promise<void> {
 		const api = new ApiClient({ username: bot.username, sessionStore, logger: stubLogger });
 		await api.restoreSession();
-		// Bypass normalizeShip — call login raw via the internal API
 		let shipClass = "?";
 		let credits = 0;
 		try {
@@ -64,11 +63,11 @@ async function main() {
 			shipClass = status.ship?.class_id ?? status.ship?.classId ?? "?";
 			credits = status.player?.credits ?? 0;
 		} catch (err: any) {
-			// Login or normalize failed — try raw query
-			const raw: any = await (api as any).query("get_ship");
-			shipClass = raw?.class_id ?? raw?.classId ?? "?";
-			const player: any = await (api as any).query("get_player");
-			credits = player?.credits ?? 0;
+			// Login normalizer failed — use raw API queries
+			const shipRaw: any = await (api as any).query("get_ship");
+			shipClass = shipRaw?.class_id ?? shipRaw?.ship?.class_id ?? "?";
+			const statusRaw: any = await (api as any).query("get_status");
+			credits = statusRaw?.player?.credits ?? statusRaw?.credits ?? 0;
 		}
 		const role = roleMap.get(bot.username) ?? "default";
 		const currentClass = catalog.find(s => s.id === shipClass) ?? LEGACY_SHIPS.find(s => s.id === shipClass);
