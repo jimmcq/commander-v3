@@ -1351,9 +1351,9 @@ function identifyBuyOrderTargets(
   // These items are scarce in the galaxy, miners can't produce them, but the
   // entire crafting pipeline depends on them. Pay premium to keep crafters working.
   const SHORTAGE_BUY: Array<{ itemId: string; minStock: number; maxPrice: number; targetQty: number }> = [
-    { itemId: "silicon_ore", minStock: 200, maxPrice: 50, targetQty: 500 },
-    { itemId: "rare_salvage", minStock: 30, maxPrice: 200, targetQty: 100 },
-    { itemId: "silver_wiring", minStock: 30, maxPrice: 100, targetQty: 100 },
+    { itemId: "silicon_ore", minStock: 500, maxPrice: 50, targetQty: 2000 },
+    { itemId: "rare_salvage", minStock: 50, maxPrice: 200, targetQty: 200 },
+    { itemId: "silver_wiring", minStock: 50, maxPrice: 100, targetQty: 200 },
   ];
   for (const sb of SHORTAGE_BUY) {
     const stock = factionStock.get(sb.itemId) ?? 0;

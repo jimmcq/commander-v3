@@ -212,10 +212,33 @@ export class Commander {
   //  CORE EVAL LOOP — clean, linear, no competing systems
   // ══════════════════════════════════════════════════════════
 
+  private lastBlacklistClear = 0;
+
   private async evaluateAndAssign(): Promise<CommanderDecision> {
     this._evaluating = true;
     const startMs = performance.now();
     try {
+      // Auto-clear crafter blacklists every 30 min so they retry failed recipes
+      // Silicon/material availability changes constantly — stale blacklists cause idle crafters
+      const now = Date.now();
+      if (now - this.lastBlacklistClear > 30 * 60 * 1000) {
+        this.lastBlacklistClear = now;
+        try {
+          const { timedCache } = await import("../data/schema");
+          const { like } = await import("drizzle-orm");
+          // Use logger's DB connection (same DB, always available)
+          const db = (this.deps.logger as any).db;
+          if (db) {
+            const deleted = await db.delete(timedCache).where(
+              like(timedCache.key, "material_unavail:%")
+            );
+            if (deleted?.rowCount > 0) {
+              console.log(`[Commander] Auto-cleared ${deleted.rowCount} crafter material blacklist(s)`);
+            }
+          }
+        } catch { /* non-critical */ }
+      }
+
       const result = await this._eval();
       const durationMs = performance.now() - startMs;
       if (durationMs > 15_000) console.warn(`[Commander] Slow eval: ${durationMs.toFixed(0)}ms`);
