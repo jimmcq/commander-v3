@@ -73,6 +73,7 @@ export class Commander {
   private decisionHistory: CommanderDecision[] = [];
   private maxHistorySize = 100;
   private _evaluating = false;
+  private startedAt = Date.now();
 
   // Ship upgrade tracking (kept from v3)
   private lastShipCheck = 0;
@@ -353,7 +354,9 @@ export class Commander {
       // Don't interrupt protected routines
       if (bot && bot.status === "running" && bot.routine && ["ship_upgrade", "refit", "return_home", "scout"].includes(bot.routine)) continue;
       // Naked bot (no modules) — run refit routine, don't assign work
-      if (bot && (bot.moduleIds ?? []).length === 0 && a.routine !== "refit") {
+      // Skip during first 3 min after startup — module data hasn't loaded yet
+      const uptimeSec = (Date.now() - this.startedAt) / 1000;
+      if (bot && (bot.moduleIds ?? []).length === 0 && a.routine !== "refit" && uptimeSec > 180) {
         console.log(`[Commander] ${a.botId} has no modules — assigning refit`);
         a.routine = "refit";
         a.params = {};

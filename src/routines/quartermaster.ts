@@ -1369,7 +1369,7 @@ function identifyBuyOrderTargets(
     targets.set(`shortage_${sb.itemId}`, {
       itemId: sb.itemId,
       itemName: ctx.crafting.getItemName(sb.itemId) || sb.itemId.replace(/_/g, " "),
-      quantityNeeded: Math.min(sb.targetQty - stock, 200),
+      quantityNeeded: Math.min(sb.targetQty - stock, 500), // Bigger batches for critical shortages
       maxBuyPrice: buyPrice,
       recommendedPrice: buyPrice,
       recipeIds: [],
