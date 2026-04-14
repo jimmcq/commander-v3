@@ -188,8 +188,7 @@ export async function* miner(ctx: BotContext): AsyncGenerator<RoutineYield, void
           ...ctx.galaxy.findPoisByType("asteroid_belt"),
           ...ctx.galaxy.findPoisByType("asteroid"),
           ...ctx.galaxy.findPoisByType("nebula"),
-          ...ctx.galaxy.findPoisByType("crystal_field"),
-          ...ctx.galaxy.findPoisByType("mineral_deposit"),
+          ...(targetOre ? ctx.galaxy.findPoisWithResource(targetOre) : []),
         ].filter(b => !ctx.galaxy.isPoiDepleted(b.poi.id));
         yield `neighbor scan: ${allBelts.length} belts found from cached data`;
       } catch (err) {
