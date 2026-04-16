@@ -1352,8 +1352,8 @@ function identifyBuyOrderTargets(
   // entire crafting pipeline depends on them. Pay premium to keep crafters working.
   const SHORTAGE_BUY: Array<{ itemId: string; minStock: number; maxPrice: number; targetQty: number }> = [
     { itemId: "silicon_ore", minStock: 500, maxPrice: 10, targetQty: 2000 },
-    { itemId: "rare_salvage", minStock: 20, maxPrice: 200, targetQty: 30 },  // Only ~12/hr consumed, was overbuying 13x
-    { itemId: "silver_wiring", minStock: 20, maxPrice: 100, targetQty: 50 },
+    { itemId: "rare_salvage", minStock: 10, maxPrice: 30, targetQty: 15 },  // 12/hr consumed, was spending 517K/day at 200cr. Slashed.
+    { itemId: "silver_wiring", minStock: 10, maxPrice: 30, targetQty: 20 }, // Was 170K/day at 100cr. Slashed.
   ];
   for (const sb of SHORTAGE_BUY) {
     const stock = factionStock.get(sb.itemId) ?? 0;

@@ -281,12 +281,33 @@ export function startBroadcastLoop(deps: BroadcastDeps): () => void {
     }
 
     // ── Always-on tasks (even without dashboard clients) ──
-    // Refresh 24h financial totals every 30s (used by economy_update + public stats)
-    if (tick % 10 === 0 && deps.trainingLogger) {
+    // Refresh 24h financial totals from faction_transactions (accurate, not wallet-delta)
+    if (tick % 10 === 0 && deps.db) {
       try {
-        const totals = await deps.trainingLogger.get24hFinancialTotals();
-        if (totals.revenue > 0 || totals.cost > 0) {
-          cached24hTotals = totals;
+        const { factionTransactions: ftx } = await import("../data/schema");
+        const { gt, eq, sql } = await import("drizzle-orm");
+        const since = Date.now() - 86_400_000;
+        const rows: any[] = await (deps.db as any).execute(sql`
+          SELECT
+            SUM(CASE WHEN ${ftx.type} = 'sell_order_fill' THEN ${ftx.credits} ELSE 0 END) as sell_revenue,
+            -SUM(CASE WHEN ${ftx.type} = 'buy_order_create' THEN ${ftx.credits} ELSE 0 END) as buy_cost
+          FROM ${ftx}
+          WHERE ${ftx.timestamp} > ${since}
+            AND ${ftx.tenantId} = ${deps.tenantId ?? ''}
+        `);
+        const r = rows?.[0];
+        if (r) {
+          const sellRevenue = Number(r.sell_revenue ?? 0);
+          const buyCost = Number(r.buy_cost ?? 0);
+          // Also add NPC trade revenue from financial_events (capped tracker, still useful for revenue)
+          const feRevenue = await deps.trainingLogger?.get24hFinancialTotals?.();
+          const npcRevenue = feRevenue?.revenue ?? 0;
+          const totalRevenue = sellRevenue + npcRevenue;
+          cached24hTotals = {
+            revenue: totalRevenue,
+            cost: buyCost + (feRevenue?.cost ?? 0),
+            profit: totalRevenue - buyCost - (feRevenue?.cost ?? 0),
+          };
         }
       } catch { /* non-critical */ }
     }
