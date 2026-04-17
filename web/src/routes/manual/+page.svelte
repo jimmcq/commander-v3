@@ -930,8 +930,8 @@
 		{:else if activeTab === "skills"}
 			<div class="grid gap-2">
 				{#each getSkills($catalogData) as skill (skill.id)}
-					<div
-						class="border border-hull-grey/20 rounded px-4 py-2.5 hover:bg-nebula-blue/15 transition-colors cursor-pointer"
+					<button
+						class="border border-hull-grey/20 rounded px-4 py-2.5 hover:bg-nebula-blue/15 transition-colors cursor-pointer text-left w-full"
 						onclick={() => expandedSkill = expandedSkill === skill.id ? null : skill.id}
 					>
 						<div class="flex items-center gap-4">
@@ -966,7 +966,7 @@
 								{/if}
 							</div>
 						{/if}
-					</div>
+					</button>
 				{/each}
 				{#if getSkills($catalogData).length === 0}
 					<p class="text-center text-hull-grey py-8">No skills match your search.</p>
@@ -977,8 +977,8 @@
 		{:else if activeTab === "recipes"}
 			<div class="grid gap-2">
 				{#each getRecipes($catalogData) as recipe (recipe.id)}
-					<div
-						class="border border-hull-grey/20 rounded px-4 py-2.5 hover:bg-nebula-blue/15 transition-colors cursor-pointer"
+					<button
+						class="border border-hull-grey/20 rounded px-4 py-2.5 hover:bg-nebula-blue/15 transition-colors cursor-pointer text-left w-full"
 						onclick={() => expandedRecipe = expandedRecipe === recipe.id ? null : recipe.id}
 					>
 						<div class="flex items-center gap-4">
@@ -1049,7 +1049,7 @@
 								</div>
 							</div>
 						{/if}
-					</div>
+					</button>
 				{/each}
 				{#if getRecipes($catalogData).length === 0}
 					<p class="text-center text-hull-grey py-8">No recipes match your search.</p>
